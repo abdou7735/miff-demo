@@ -19,13 +19,18 @@ const ROUTES = [
   [/^#\/ajouter$/, "Ajouter", "ajouter", () => V.viewAdd()],
   [/^#\/verifier$/, "Vérifier", "ajouter", () => V.viewVerify(), "#/ajouter"],
   [/^#\/reglages$/, "Réglages", "reglages", () => V.viewSettings()],
+  [/^#\/chat$/, "Discussions", "chat", () => V.viewChats()],
+  [/^#\/chat\/([\w:-]+)$/, "Discussion", "chat", (m) => V.viewChat(m[1]), "#/chat"],
+  [/^#\/notifications$/, "Notifications", "", () => V.viewNotifications(), "back"],
 ];
 
 function tabs(active) {
   const t = (key, label, ic) => h("a", { href: `#/${key}`, class: active === key ? "on" : "", "aria-current": active === key ? "page" : null }, ic, label);
   return h("nav", { class: "tabs", "aria-label": "Navigation" },
     t("arbre", "Arbre", icon("tree")), t("documents", "Documents", icon("doc")),
-    t("ajouter", "Ajouter", h("span", { class: "plus" }, icon("plus"))), t("reglages", "Réglages", icon("gear")));
+    t("ajouter", "Ajouter", h("span", { class: "plus" }, icon("plus"))),
+    t("chat", "Chat", h("span", { class: "tabic" }, icon("chat"), h("i", { class: "dot", "data-badge": "chats", hidden: true }))),
+    t("reglages", "Réglages", icon("gear")));
 }
 
 let renderId = 0;
@@ -53,7 +58,9 @@ async function route() {
   const main = h("main", {}, h("div", { class: "spinner" }));
   const backBtn = back ? h("button", { class: "back", onclick: () => (back === "back" ? history.back() : (location.hash = back)) }, icon("back"), "Retour") : null;
   const header = h("header", { class: "top" }, backBtn || h("h1", {}, title),
-    h("a", { class: "me", href: "#/reglages", "aria-label": "Mes réglages" }, me.member.first_name, h("span", { class: "av self" }, initials(me.member))));
+    h("div", { class: "topr" },
+      h("a", { class: "bell", href: "#/notifications", "aria-label": "Notifications" }, icon("bell"), h("i", { class: "dot", "data-badge": "notifs", hidden: true })),
+      h("a", { class: "me", href: "#/reglages", "aria-label": "Mes réglages" }, me.member.first_name, h("span", { class: "av self" }, initials(me.member)))));
   app.replaceChildren(header, ...(window.MIFF_DEMO ? [h("div", { class: "demobar" }, "Démo : famille inventée, données gardées sur cet appareil.")] : []), main, tabs(tab));
   try {
     const content = await fn(m);
@@ -63,8 +70,11 @@ async function route() {
     if (id !== renderId) return;
     main.replaceChildren(errBox(e));
   }
-  window.scrollTo(0, 0);
+  if (!hash.startsWith("#/chat/")) window.scrollTo(0, 0);
+  document.body.classList.toggle("inchat", hash.startsWith("#/chat/"));
+  V.refreshBadges();
 }
+setInterval(() => { if (V.state.me && document.visibilityState === "visible") V.refreshBadges(); }, 15000);
 
 window.addEventListener("hashchange", route);
 route();

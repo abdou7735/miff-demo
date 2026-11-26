@@ -105,27 +105,70 @@ export async function viewInvite(token) {
 
 export async function viewTree() {
   await loadMembers();
+  const meId = state.me.member.id;
+  if (!state.tree) state.tree = { level: 1, center: meId, scale: null };
+  const st = state.tree;
+  if (!M(st.center)) st.center = meId;
   const box = h("div", { class: "treebox" });
   const pick = (id) => (location.hash = `#/personne/${id}`);
-  const render = () => box.replaceChildren(drawTree(state.members, state.me.member.id, pick, state.treeScale || 1));
-  if (!state.treeScale) {
-    // Première ouverture : l'arbre entier tient dans l'écran (sans devenir illisible).
-    const W = Number(drawTree(state.members, state.me.member.id, pick, 1).getAttribute("width"));
-    state.treeScale = Math.max(0.45, Math.min(1, (Math.min(window.innerWidth, 560) - 8) / W));
+  const levels = h("div", { class: "sub", role: "tablist", "aria-label": "Jusqu'où voir" });
+  const banner = h("div");
+  const info = h("div", { class: "hint" });
+  const draw = (scale) => drawTree(state.members, meId, pick, { scale, centerId: st.center, level: st.level, onExpand: (id) => { st.center = id; st.scale = null; render(true); } });
+  function render(recenter) {
+    if (!st.scale) {
+      // L'arbre tient dans la largeur de l'écran, sans devenir illisible.
+      const W = Number(draw(1).getAttribute("width"));
+      st.scale = Math.max(0.5, Math.min(1, (Math.min(window.innerWidth, 560) - 8) / W));
+    }
+    const svg = draw(st.scale);
+    box.replaceChildren(svg);
+    levels.replaceChildren(...[[1, "Proche"], [2, "Famille"], [3, "Tout l'arbre"]].map(([l, txt]) =>
+      h("button", { class: st.level === l ? "on" : "", role: "tab", "aria-selected": st.level === l ? "true" : "false", onclick: () => { st.level = l; st.scale = null; render(true); } }, txt)));
+    const c = M(st.center);
+    banner.replaceChildren(...(st.center !== meId && c && st.level < 3 ? [h("div", { class: "centerbar" }, h("span", {}, "Vu depuis ", h("b", {}, c.first_name)),
+      h("button", { onclick: () => { st.center = meId; st.scale = null; render(true); } }, "Revenir à moi"))] : []));
+    const shown = svg.querySelectorAll(".node").length;
+    info.textContent = st.level < 3
+      ? `${shown} personne${shown > 1 ? "s" : ""} sur ${state.members.length}. Touchez une bulle « +2 » pour voir la famille de quelqu'un, ou « Famille » pour voir plus loin.`
+      : `Les ${state.members.length} personnes de l'arbre. Faites glisser pour tout voir. Touchez une personne pour ouvrir sa fiche.`;
+    if (recenter) requestAnimationFrame(() => {
+      const p = svg._pos(st.center);
+      box.scrollLeft = p ? p.x - box.clientWidth / 2 : (box.scrollWidth - box.clientWidth) / 2;
+    });
   }
-  render();
-  setTimeout(() => { box.scrollLeft = (box.scrollWidth - box.clientWidth) / 2; }, 0);
-  const zoom = (d) => { state.treeScale = Math.min(1.6, Math.max(0.4, state.treeScale + d)); render(); };
-  const me = M(state.me.member.id);
-  const nb = state.members.length;
+  const zoom = (d) => { st.scale = Math.min(1.6, Math.max(0.35, st.scale + d)); const cx = box.scrollLeft + box.clientWidth / 2, k = (st.scale) / (st.scale - d); render(false); box.scrollLeft = cx * k - box.clientWidth / 2; };
+  // Pincer avec deux doigts pour zoomer.
+  let pinch = null;
+  box.addEventListener("touchstart", (e) => { if (e.touches.length === 2) pinch = { d: dist(e), s: st.scale }; }, { passive: true });
+  box.addEventListener("touchmove", (e) => {
+    if (!pinch || e.touches.length !== 2) return;
+    const ns = Math.min(1.6, Math.max(0.35, pinch.s * dist(e) / pinch.d));
+    if (Math.abs(ns - st.scale) > 0.04) { st.scale = ns; render(false); }
+  }, { passive: true });
+  box.addEventListener("touchend", () => { pinch = null; });
+  const dist = (e) => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+
+  const results = h("div", { class: "wrapchips", style: "margin-top:8px" });
+  const search = h("input", { class: "field", type: "search", placeholder: "Chercher quelqu'un (prénom)", "aria-label": "Chercher quelqu'un dans l'arbre", oninput: () => {
+    const q = norm(search.value.trim());
+    results.replaceChildren(...(q ? state.members.filter((m) => norm(fullName(m)).includes(q)).slice(0, 6).map((m) =>
+      h("button", { class: "chip", onclick: () => { st.center = m.id; st.level = Math.max(st.level, 1) === 3 ? 3 : 2; st.scale = null; search.value = ""; results.replaceChildren(); render(true); } }, m.first_name, m.relation && m.relation !== "Moi" ? ` · ${m.relation.toLowerCase()}` : "")) : []));
+  } });
+  render(true);
+  const me = M(meId);
   return [
+    levels, banner,
     h("div", { class: "zoom" }, h("button", { "aria-label": "Dézoomer", onclick: () => zoom(-0.15) }, "−"), h("button", { "aria-label": "Zoomer", onclick: () => zoom(0.15) }, "+")),
     box,
     h("div", { class: "legend" }, h("span", {}, h("i", { style: "background:#1f6a4b" }), "Moi"), h("span", {}, h("i", { style: "background:#c4e5d3" }), "Frères et sœurs"), h("span", {}, h("i", { style: "background:#9097a1" }), "Décédé")),
-    h("div", { class: "hint" }, `Touchez une personne pour ouvrir sa fiche. L'arbre compte ${nb} personne${nb > 1 ? "s" : ""}. Faites glisser pour voir toute la famille.`),
-    h("button", { class: "btn sec", onclick: () => editPerson(null, { sibling_of: me?.id }) }, "+ Ajouter un frère ou une sœur"),
+    info, search, results,
+    h("button", { class: "btn", onclick: () => birthSheet() }, "👶 Annoncer une naissance"),
+    h("button", { class: "btn sec", style: "margin-top:10px", onclick: () => editPerson(null, { sibling_of: me?.id }) }, "+ Ajouter un frère ou une sœur"),
   ];
 }
+
+function norm(t) { return (t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
 
 export async function viewPerson(id) {
   await loadMembers();
@@ -138,6 +181,9 @@ export async function viewPerson(id) {
   if (p.death_date || p.deceased) infos.push(h("dt", {}, "Décès"), h("dd", {}, frDate(p.death_date) || "Oui"));
   if (p.birth_name) infos.push(h("dt", {}, "Nom de naissance"), h("dd", {}, p.birth_name));
   const actions = [];
+  actions.push(h("div", { class: "row" },
+    h("button", { class: "btn sec", onclick: () => { state.tree = { level: 1, center: p.id, scale: null }; location.hash = "#/arbre"; } }, "Voir sa famille dans l'arbre"),
+    !isMe && p.has_account ? h("a", { class: "btn sec", href: `#/chat/${dmKey(state.me.member.id, p.id)}` }, `Écrire à ${p.first_name}`) : null));
   if (p.can_edit) actions.push(h("button", { class: "btn ghost", onclick: () => editPerson(p) }, "Modifier la fiche"));
   actions.push(h("div", { class: "row" },
     h("button", { class: "btn sec", onclick: () => editPerson(null, { parent_of: p.id }) }, "+ Parent"),
@@ -248,6 +294,13 @@ function targetsLabel(targets) {
 }
 
 function docRow(d) {
+  if (d.locked) {
+    const st = d.request?.status === "pending" ? "Demande envoyée" : d.request?.status === "refused" ? "Demande refusée" : "Demander l'accès";
+    return h("a", { class: "doc locked", href: `#/document/${d.id}` },
+      h("span", { class: "ic lock" }, icon("lock")),
+      h("span", {}, h("b", {}, d.title), h("span", { class: "m" }, [d.folder_name, d.person_name, d.owner_name ? `ajouté par ${d.owner_name}` : ""].filter(Boolean).join(" · ")), h("br"),
+        h("span", { class: "badge b-private" }, "🔒 ", st)));
+  }
   const meta = [d.person_name, d.year, !d.mine && d.owner_name ? `ajouté par ${d.owner_name}` : ""].filter(Boolean).join(" · ");
   return h("a", { class: "doc", href: `#/document/${d.id}` },
     h("span", { class: "ic" }, "PDF"),
@@ -317,10 +370,11 @@ export async function viewDocument(id) {
   if (!state.groups) state.groups = await api.get("/api/groups").catch(() => null);
   let d;
   try { d = await api.get(`/api/documents/${id}`); } catch (e) { return errBox(e); }
+  if (d.locked) return lockedDocView(d);
   const fileUrl = `/api/documents/${id}/file`;
   const fields = Object.values(d.fields || {});
   const out = [
-    h("div", { class: "crumb" }, h("a", { href: "#/documents" }, "Documents"), "›", d.parent_folder_name, "›", h("a", { href: `#/dossier/${d.folder_id}` }, d.folder_name)),
+    h("div", { class: "crumb" }, h("a", { href: "#/documents" }, "Documents"), "›", h("span", {}, d.parent_folder_name), "›", h("a", { href: `#/dossier/${d.folder_id}` }, d.folder_name)),
     h("h2", { style: "margin-top:4px" }, d.title),
     h("div", { class: "muted small" }, [d.doc_type_label, d.person_name, `${d.pages} page${d.pages > 1 ? "s" : ""}`, `ajouté le ${frDate(d.created_at)}`, !d.mine ? `par ${d.owner_name}` : ""].filter(Boolean).join(" · ")),
     visBadge(d),
@@ -330,6 +384,11 @@ export async function viewDocument(id) {
     h("div", { class: "row" }, apiLink(fileUrl, { class: "btn" }, "Ouvrir"), apiLink(fileUrl + "?download=1", { class: "btn sec" }, "Télécharger", d.title + (d.mime === "application/pdf" ? ".pdf" : ".jpg"))),
     fields.length ? h("div", { class: "card" }, h("h3", {}, "Informations"), h("dl", { class: "rel", style: "margin:0" }, fields.map((f) => [h("dt", {}, f.label), h("dd", {}, f.value)]))) : null,
   ];
+  if (d.granted_until !== undefined) out.splice(4, 0, h("div", { class: "seen" }, d.granted_until ? `Accès accordé jusqu'au ${frDate(d.granted_until)}` : "Accès accordé sans limite de durée"));
+  if (d.mine && d.pending_requests?.length) out.push(h("h2", {}, "Demandes en attente"), ...d.pending_requests.map((r) => requestCard(r)));
+  if (d.mine && d.grants?.length) out.push(h("div", { class: "card" }, h("h3", {}, "Accès accordés à la demande"),
+    d.grants.map((g) => h("div", { class: "set" }, h("span", {}, h("b", {}, g.name), " · ", g.until ? `jusqu'au ${frDate(g.until)}` : "sans limite"),
+      h("button", { class: "linkbtn", onclick: async () => { if (!await ask(`Retirer l'accès de ${g.name} ?`)) return; await api.del(`/api/documents/${id}/grants/${g.member_id}`); toast("Accès retiré"); window.dispatchEvent(new HashChangeEvent("hashchange")); } }, "Retirer")))));
   if (d.mine) {
     out.push(h("button", { class: "btn ghost", onclick: () => location.hash = `#/modifier/${id}` }, "Modifier ou changer qui le voit"));
     out.push(h("button", { class: "btn danger", onclick: async () => {
@@ -391,7 +450,7 @@ export async function viewEditDoc(id) {
   await loadMembers();
   return docForm({
     header: null, preview: null,
-    values: { title: d.title, folder_id: d.folder_id, person_id: d.person_id, year: d.year, fields: d.fields, visibility: d.visibility, targets: d.targets },
+    values: { title: d.title, folder_id: d.folder_id, person_id: d.person_id, year: d.year, fields: d.fields, visibility: d.visibility, targets: d.targets, hidden: d.hidden },
     warn: {}, submitLabel: "Enregistrer",
     onSubmit: async (body) => { await api.patch(`/api/documents/${id}`, body); toast("Modifications enregistrées"); location.hash = `#/document/${id}`; },
   });
@@ -421,7 +480,11 @@ async function docForm({ header, preview, values, warn, submitLabel, onSubmit })
   const optsBox = h("div", { class: "opts" });
   const customBox = h("div");
   const seen = h("div", { class: "seen" });
+  let hidden = !!values.hidden;
+  const hideBox = h("div");
   const renderVis = () => {
+    hideBox.replaceChildren(vis === "family" ? null : h("label", { class: "lbl", style: "font-weight:500" }, h("input", { type: "checkbox", checked: hidden, onchange: (e) => { hidden = e.target.checked; } }),
+      "Cacher complètement aux autres (sans cadenas, on ne peut pas le demander)"));
     optsBox.replaceChildren(...[["private", "Privé", "Moi seulement (et la personne concernée)"], ["custom", "Certaines personnes", "Un groupe ou des personnes choisies"], ["family", "Toute la famille", "Tous les membres de Miff"]].map(([k, l, d]) =>
       h("label", { class: `opt ${vis === k ? "on" : ""}` }, h("input", { type: "radio", name: "vis", checked: vis === k, onchange: () => { vis = k; renderVis(); } }), h("span", {}, h("b", {}, l), h("small", {}, d)))));
     if (vis !== "custom") { customBox.replaceChildren(); return; }
@@ -451,7 +514,7 @@ async function docForm({ header, preview, values, warn, submitLabel, onSubmit })
     for (const [k, f] of Object.entries(fieldInputs)) fields[k] = { label: f.label, value: f.el.value };
     btn.disabled = true;
     try {
-      await onSubmit({ title: title.value, folder_id: Number(folder.value), person_id: Number(person.value) || null, year: year.value, fields, visibility: vis, targets: [...targets] });
+      await onSubmit({ title: title.value, folder_id: Number(folder.value), person_id: Number(person.value) || null, year: year.value, fields, visibility: vis, targets: [...targets], hidden: vis !== "family" && hidden });
     } catch (x) { err.replaceChildren(errBox(x)); btn.disabled = false; }
   } },
     header,
@@ -461,7 +524,7 @@ async function docForm({ header, preview, values, warn, submitLabel, onSubmit })
     h("label", { class: "lbl", for: "d-folder" }, "Dossier", tag(warn.folder_id)), folder,
     h("label", { class: "lbl", for: "d-person" }, "Ce document concerne", tag(warn.person_id)), person,
     h("label", { class: "lbl", for: "d-year" }, "Année"), year,
-    h("div", { class: "lbl", style: "margin-top:22px" }, "Qui peut voir ce document ?"), optsBox, customBox,
+    h("div", { class: "lbl", style: "margin-top:22px" }, "Qui peut voir ce document ?"), optsBox, customBox, hideBox,
     err, btn);
 }
 
@@ -566,3 +629,257 @@ function installCard() {
 }
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+// ================================================================ Documents à cadenas et demandes d'accès
+
+const DURATIONS = [["once", "Une seule fois", "24 heures"], ["7d", "7 jours", "puis l'accès s'arrête"], ["always", "Pour toujours", "jusqu'à ce qu'il le retire"]];
+const durLabel = (k) => (DURATIONS.find((d) => d[0] === k) || DURATIONS[1])[1].toLowerCase();
+
+function lockedDocView(d) {
+  const r = d.request;
+  const status = !r ? null
+    : r.status === "pending" ? h("div", { class: "detected" }, h("b", {}, "Demande envoyée"), `${d.owner_name || "Le propriétaire"} a été prévenu. Vous recevrez une notification avec sa réponse.`)
+    : r.status === "refused" ? h("div", { class: "err" }, `Demande refusée${r.answer ? ` : « ${r.answer} »` : "."}`)
+    : null;
+  return [
+    h("div", { class: "crumb" }, h("a", { href: "#/documents" }, "Documents"), "›", h("span", {}, d.parent_folder_name), "›", h("a", { href: `#/dossier/${d.folder_id}` }, d.folder_name)),
+    h("div", { class: "lockhero" }, h("span", { class: "ic lock big" }, icon("lock")),
+      h("h2", {}, d.title), h("div", { class: "muted small" }, [d.person_name, d.owner_name ? `ajouté par ${d.owner_name}` : ""].filter(Boolean).join(" · ")),
+      h("p", {}, `Ce document est privé. Vous pouvez demander à ${d.owner_name || "son propriétaire"} de vous le montrer, en expliquant pourquoi.`)),
+    status,
+    !r || r.status !== "pending" ? h("button", { class: "btn", onclick: () => requestSheet(d) }, r?.status === "refused" ? "Redemander l'accès" : "Demander l'accès") : null,
+  ];
+}
+
+function requestSheet(d) {
+  let dur = "7d";
+  const reason = h("textarea", { class: "field", id: "rq-reason", placeholder: "Ex. : j'en ai besoin pour mon dossier de bourse", maxlength: 500 });
+  const opts = h("div", { class: "opts" });
+  const renderOpts = () => opts.replaceChildren(...DURATIONS.map(([k, l, s2]) => h("label", { class: `opt ${dur === k ? "on" : ""}` },
+    h("input", { type: "radio", name: "dur", checked: dur === k, onchange: () => { dur = k; renderOpts(); } }), h("span", {}, h("b", {}, l), h("small", {}, s2)))));
+  renderOpts();
+  const err = h("div");
+  const close = sheet(h("form", { onsubmit: async (e) => {
+    e.preventDefault(); err.replaceChildren();
+    try { await api.post(`/api/documents/${d.id}/request`, { reason: reason.value, duration: dur }); close(); toast("Demande envoyée"); window.dispatchEvent(new HashChangeEvent("hashchange")); }
+    catch (x) { err.replaceChildren(errBox(x)); }
+  } },
+    h("h2", {}, "Demander l'accès"),
+    h("p", { class: "muted", style: "margin-top:0" }, `${d.title}${d.person_name ? " · " + d.person_name : ""}`),
+    h("label", { class: "lbl", for: "rq-reason" }, "Pourquoi en avez-vous besoin ?"), reason,
+    h("div", { class: "lbl" }, "Pendant combien de temps ?"), opts,
+    err, h("button", { class: "btn", type: "submit" }, "Envoyer la demande"), h("button", { class: "btn ghost", type: "button", onclick: () => close() }, "Annuler")));
+  setTimeout(() => reason.focus(), 50);
+}
+
+function requestCard(r, after) {
+  const refresh = () => (after ? after() : window.dispatchEvent(new HashChangeEvent("hashchange")));
+  const answer = (accept) => {
+    let dur = r.duration;
+    const msg = h("input", { class: "field", placeholder: accept ? "Un petit mot (facultatif)" : "Pourquoi ? (facultatif)" });
+    const opts = h("div", { class: "opts" });
+    const renderOpts = () => opts.replaceChildren(...DURATIONS.map(([k, l, s2]) => h("label", { class: `opt ${dur === k ? "on" : ""}` },
+      h("input", { type: "radio", name: "adur", checked: dur === k, onchange: () => { dur = k; renderOpts(); } }), h("span", {}, h("b", {}, l), h("small", {}, s2)))));
+    renderOpts();
+    const close = sheet(h("h2", {}, accept ? `Montrer le document à ${r.from_name}` : `Refuser la demande de ${r.from_name}`),
+      accept ? [h("div", { class: "lbl" }, "Pendant combien de temps ?"), opts] : null,
+      msg,
+      h("button", { class: accept ? "btn" : "btn danger", onclick: async () => {
+        try { await api.post(`/api/requests/${r.id}/answer`, { accept, duration: dur, message: msg.value }); close(); toast(accept ? "Accès accordé" : "Demande refusée"); refresh(); }
+        catch (x) { toast(x.message); }
+      } }, accept ? "Accepter" : "Refuser"),
+      h("button", { class: "btn ghost", onclick: () => close() }, "Annuler"));
+  };
+  return h("div", { class: "card req" },
+    h("div", { class: "reqhead" }, av(M(r.from_member)), h("span", {}, h("b", {}, r.from_name), " demande à voir ", h("a", { href: `#/document/${r.doc_id}` }, r.doc_title))),
+    h("blockquote", {}, r.reason),
+    h("div", { class: "small muted" }, `Durée demandée : ${durLabel(r.duration)} · ${frDate(r.at)}`),
+    h("div", { class: "row" }, h("button", { class: "btn", onclick: () => answer(true) }, "Accepter"), h("button", { class: "btn ghost", onclick: () => answer(false) }, "Refuser")));
+}
+
+// ================================================================ Notifications
+
+export async function viewNotifications() {
+  await loadMembers();
+  const data = await api.get("/api/notifications");
+  api.post("/api/notifications/read").then(() => refreshBadges()).catch(() => {});
+  const stLabel = { pending: "en attente", accepted: "acceptée", refused: "refusée" };
+  return [
+    data.requests.length ? [h("h2", { style: "margin-top:4px" }, "À vous de répondre"), ...data.requests.map((r) => requestCard(r))] : null,
+    h("h2", {}, "Notifications"),
+    data.notifications.length ? h("div", { class: "card" }, data.notifications.map((n) => h("a", { class: `notif ${n.read ? "" : "new"}`, href: n.link || "#/arbre" },
+      h("span", { class: "nic" }, { birth: "👶", request: "🔑", answer: "✉️" }[n.kind] || "•"), h("span", {}, n.text, h("small", {}, frDate(n.at))))))
+      : h("div", { class: "empty" }, "Rien de nouveau pour le moment."),
+    data.my_requests.length ? [h("h2", {}, "Mes demandes"), h("div", { class: "card" }, data.my_requests.map((r) => h("a", { class: "notif", href: `#/document/${r.doc_id}` },
+      h("span", { class: "nic" }, r.status === "accepted" ? "✅" : r.status === "refused" ? "⛔" : "⏳"),
+      h("span", {}, `${r.doc_title} · ${stLabel[r.status]}`, h("small", {}, r.status === "accepted" ? (r.until ? `jusqu'au ${frDate(r.until)}` : "sans limite") : r.answer ? `« ${r.answer} »` : frDate(r.at))))))] : null,
+  ];
+}
+
+export async function refreshBadges() {
+  try {
+    const b = await api.get("/api/badges");
+    document.querySelectorAll("[data-badge]").forEach((el) => { const n = b[el.dataset.badge] || 0; el.textContent = n > 9 ? "9+" : n; el.hidden = !n; });
+  } catch {}
+}
+
+// ================================================================ Naissance
+
+export function birthSheet() {
+  const me = M(state.me.member.id);
+  const kids = state.members.filter((x) => x.father_id === me.id || x.mother_id === me.id);
+  const spouse = (me.spouses || []).map(M).find(Boolean);
+  const f = {};
+  const fatherDef = me.sex === "F" ? spouse?.id : me.id, motherDef = me.sex === "F" ? me.id : spouse?.id;
+  const peopleSelect = (k, sex, def) => (f[k] = h("select", { class: "field", id: "b-" + k }, h("option", { value: "" }, "—"),
+    state.members.filter((x) => !x.sex || x.sex === sex).sort((a, b) => a.first_name.localeCompare(b.first_name)).map((x) => h("option", { value: x.id, selected: x.id === def }, fullName(x)))));
+  const today = new Date().toISOString().slice(0, 10);
+  const photo = h("input", { type: "file", accept: "image/*", id: "b-photo" });
+  const err = h("div");
+  const btn = h("button", { class: "btn", type: "submit" }, "Annoncer la naissance");
+  const close = sheet(h("form", { onsubmit: async (e) => {
+    e.preventDefault(); err.replaceChildren(); btn.disabled = true;
+    const fd = new FormData();
+    for (const k of ["first_name", "last_name", "sex", "birth_date", "birth_place", "father_id", "mother_id", "message"]) fd.append(k, f[k].value);
+    if (photo.files[0]) fd.append("photo", photo.files[0]);
+    try { const r = await api.form("/api/births", fd); close(); toast("Naissance annoncée à toute la famille"); state.tree = { level: 1, center: r.id, scale: null }; location.hash = `#/personne/${r.id}`; }
+    catch (x) { err.replaceChildren(errBox(x)); btn.disabled = false; }
+  } },
+    h("h2", {}, "Annoncer une naissance"),
+    h("p", { class: "muted small", style: "margin-top:0" }, "Le bébé sera ajouté à l'arbre et toute la famille sera prévenue dans le chat."),
+    h("label", { class: "lbl", for: "b-first_name" }, "Prénom du bébé"), (f.first_name = h("input", { class: "field", id: "b-first_name", required: true })),
+    h("label", { class: "lbl", for: "b-sex" }, "C'est"), (f.sex = h("select", { class: "field", id: "b-sex" }, h("option", { value: "F" }, "Une fille"), h("option", { value: "M" }, "Un garçon"))),
+    h("label", { class: "lbl", for: "b-birth_date" }, "Date de naissance"), (f.birth_date = h("input", { class: "field", id: "b-birth_date", type: "date", value: today, max: today })),
+    h("label", { class: "lbl", for: "b-birth_place" }, "Lieu de naissance"), (f.birth_place = h("input", { class: "field", id: "b-birth_place", placeholder: "ex. Mamoudzou" })),
+    h("label", { class: "lbl", for: "b-father_id" }, "Père"), peopleSelect("father_id", "M", fatherDef),
+    h("label", { class: "lbl", for: "b-mother_id" }, "Mère"), peopleSelect("mother_id", "F", motherDef),
+    h("label", { class: "lbl", for: "b-last_name" }, "Nom de famille"), (f.last_name = h("input", { class: "field", id: "b-last_name", value: (me.sex === "F" ? spouse?.last_name : me.last_name) || me.last_name || "" })),
+    h("label", { class: "lbl", for: "b-photo" }, "Une photo (facultatif)"), photo,
+    h("label", { class: "lbl", for: "b-message" }, "Un mot pour la famille (facultatif)"), (f.message = h("textarea", { class: "field", id: "b-message", placeholder: kids.length ? "" : "ex. La maman et le bébé vont bien !" })),
+    err, btn, h("button", { class: "btn ghost", type: "button", onclick: () => close() }, "Annuler")));
+}
+
+// ================================================================ Chat
+
+export const dmKey = (a, b) => `dm:${Math.min(a, b)}-${Math.max(a, b)}`;
+
+function timeShort(at) {
+  if (!at) return "";
+  const d = new Date(at.replace(" ", "T") + "Z"), now = new Date();
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+}
+
+export async function viewChats() {
+  await loadMembers();
+  const list = await api.get("/api/chats");
+  const ic = (c) => c.kind === "dm" ? av(M(c.other)) : h("span", { class: "av grp" }, c.key === "fam" ? "🏠" : c.key.startsWith("sib") ? "👫" : c.key.startsWith("cou") ? "🌳" : c.key.startsWith("foy") ? "👪" : "💬");
+  return [
+    h("div", { class: "card", style: "margin-top:0;padding:4px 14px" }, list.map((c) => h("a", { class: "chatrow", href: `#/chat/${c.key}` }, ic(c),
+      h("span", {}, h("b", {}, c.name), h("small", {}, c.last_text || (c.kind === "auto" ? c.member_names.join(", ") + (c.member_count > 8 ? "…" : "") : "Pas encore de message"))),
+      h("span", { class: "meta" }, h("small", {}, timeShort(c.last_at)), c.unread ? h("em", {}, c.unread) : null)))),
+    h("div", { class: "hint" }, "Les groupes « Frères et sœurs », « Cousins »… se créent tout seuls à partir de l'arbre. Une naissance ou un mariage les met à jour."),
+    h("div", { class: "row" },
+      h("button", { class: "btn sec", onclick: () => newDmSheet() }, "Écrire à quelqu'un"),
+      h("button", { class: "btn sec", onclick: () => newGroupSheet() }, "Nouveau groupe")),
+  ];
+}
+
+function newDmSheet() {
+  const me = state.me.member.id;
+  const close = sheet(h("h2", {}, "Écrire à…"), h("div", { class: "people" },
+    state.members.filter((x) => x.id !== me && x.has_account).sort((a, b) => a.first_name.localeCompare(b.first_name)).map((x) =>
+      h("a", { class: "person", href: `#/chat/${dmKey(me, x.id)}`, onclick: () => close() }, av(x), x.first_name))),
+    h("p", { class: "small muted" }, "Seules les personnes qui ont un compte Miff apparaissent ici."),
+    h("button", { class: "btn ghost", onclick: () => close() }, "Annuler"));
+}
+
+function newGroupSheet() {
+  const me = state.me.member.id;
+  const sel = new Set();
+  const name = h("input", { class: "field", placeholder: "ex. Organisation du mariage", id: "g-name" });
+  const box = h("div", { class: "wrapchips" });
+  const render = () => box.replaceChildren(...state.members.filter((x) => x.id !== me && x.has_account).sort((a, b) => a.first_name.localeCompare(b.first_name)).map((x) =>
+    h("button", { type: "button", class: `chip ${sel.has(x.id) ? "on" : ""}`, onclick: () => { sel.has(x.id) ? sel.delete(x.id) : sel.add(x.id); render(); } }, x.first_name)));
+  render();
+  const err = h("div");
+  const close = sheet(h("form", { onsubmit: async (e) => {
+    e.preventDefault();
+    try { const r = await api.post("/api/chats", { name: name.value, member_ids: [...sel] }); close(); location.hash = `#/chat/${r.key}`; } catch (x) { err.replaceChildren(errBox(x)); }
+  } }, h("h2", {}, "Nouveau groupe"), h("label", { class: "lbl", for: "g-name" }, "Nom du groupe"), name, h("div", { class: "lbl" }, "Qui est dedans ?"), box, err,
+    h("button", { class: "btn", type: "submit" }, "Créer le groupe"), h("button", { class: "btn ghost", type: "button", onclick: () => close() }, "Annuler")));
+}
+
+let chatTimer = null;
+export async function viewChat(key) {
+  await loadMembers();
+  let data;
+  try { data = await api.get(`/api/chats/${encodeURIComponent(key)}`); } catch (e) { return errBox(e); }
+  refreshBadges();
+  const list = h("div", { class: "msgs" });
+  let lastId = 0;
+  const bubble = (m) => {
+    if (m.kind === "birth" && m.baby) {
+      return h("div", { class: "birthcard" },
+        m.has_image ? apiImg(`/api/chats/${encodeURIComponent(key)}/image/${m.id}`, { alt: `Photo de ${m.baby.first_name}`, class: "bphoto" }) : h("div", { class: "bemoji" }, "👶"),
+        h("div", { class: "bbody" }, h("small", {}, "Naissance"), h("b", {}, m.baby.first_name), h("span", {}, `${m.baby.sex === "F" ? "Fille" : m.baby.sex === "M" ? "Fils" : "Enfant"} de ${m.baby.parents.filter(Boolean).join(" et ")}`),
+          m.text ? h("p", {}, m.text) : null,
+          h("a", { href: `#/personne/${m.baby.id}`, class: "linkbtn" }, "Voir dans l'arbre")),
+        h("div", { class: "bmeta" }, `Annoncé par ${m.from_name} · ${timeShort(m.at)}`));
+    }
+    return h("div", { class: `msg ${m.mine ? "mine" : ""}` },
+      !m.mine && data.kind !== "dm" ? h("small", { class: "who" }, m.from_name) : null,
+      m.has_image ? apiImg(`/api/chats/${encodeURIComponent(key)}/image/${m.id}`, { alt: "Photo", class: "mphoto" }) : null,
+      m.doc ? h("a", { class: "mdoc", href: `#/document/${m.doc.id}` }, h("span", { class: `ic ${m.doc.locked ? "lock" : ""}` }, m.doc.locked ? icon("lock") : "PDF"), h("span", {}, m.doc.title, h("small", {}, m.doc.locked ? "Privé, touchez pour demander l'accès" : "Ouvrir le document"))) : null,
+      m.text ? h("span", { class: "txt" }, m.text) : null,
+      h("small", { class: "time" }, timeShort(m.at)));
+  };
+  const paint = (msgs) => {
+    const atBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 80;
+    for (const m of msgs) if (m.id > lastId) { list.append(bubble(m)); lastId = m.id; }
+    if (atBottom || !paint.done) requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight));
+    paint.done = true;
+  };
+  if (!data.messages.length) list.append(h("div", { class: "empty" }, "Pas encore de message. Dites bonjour !"));
+  paint(data.messages);
+  clearInterval(chatTimer);
+  chatTimer = setInterval(async () => {
+    if (!location.hash.startsWith(`#/chat/${key}`)) { clearInterval(chatTimer); return; }
+    try { const d = await api.get(`/api/chats/${encodeURIComponent(key)}`); if (d.messages.some((m) => m.id > lastId)) { list.querySelector(".empty")?.remove(); paint(d.messages); } } catch {}
+  }, 4000);
+
+  const text = h("textarea", { class: "field", rows: 1, placeholder: "Message", "aria-label": "Votre message", onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey && window.innerWidth > 700) { e.preventDefault(); send(); } } });
+  const img = h("input", { type: "file", accept: "image/*", hidden: true, onchange: () => { if (img.files[0]) send(img.files[0]); } });
+  async function send(file, docId) {
+    if (!file && !docId && !text.value.trim()) return;
+    const fd = new FormData();
+    fd.append("text", file || docId ? "" : text.value);
+    if (file) fd.append("image", file);
+    if (docId) fd.append("doc_id", docId);
+    try {
+      await api.form(`/api/chats/${encodeURIComponent(key)}`, fd);
+      if (!file && !docId) text.value = "";
+      img.value = "";
+      const d = await api.get(`/api/chats/${encodeURIComponent(key)}`); list.querySelector(".empty")?.remove(); paint(d.messages);
+      window.scrollTo(0, document.body.scrollHeight);
+    } catch (x) { toast(x.message); }
+  }
+  async function shareDoc() {
+    const docs = await api.get("/api/documents?scope=mine");
+    const close = sheet(h("h2", {}, "Partager un document"),
+      h("p", { class: "small muted", style: "margin-top:0" }, "Le document reste protégé : seuls ceux qui ont déjà le droit de le voir pourront l'ouvrir. Les autres pourront demander l'accès."),
+      docs.length ? h("div", { class: "card" }, docs.map((d) => h("button", { class: "doc", style: "width:100%;background:none;border:0;border-bottom:1px solid var(--line);text-align:left", onclick: () => { close(); send(null, d.id); } },
+        h("span", { class: "ic" }, "PDF"), h("span", {}, h("b", {}, d.title), h("span", { class: "m" }, d.folder_name))))) : h("div", { class: "empty" }, "Vous n'avez encore ajouté aucun document."),
+      h("button", { class: "btn ghost", onclick: () => close() }, "Annuler"));
+  }
+  const names = data.members.map((i) => M(i)?.first_name).filter(Boolean);
+  return [
+    h("div", { class: "chathead" }, h("h2", {}, data.name), h("div", { class: "small muted" }, data.kind === "dm" ? "Discussion privée" : `${names.length} personnes : ${names.slice(0, 10).join(", ")}${names.length > 10 ? "…" : ""}`)),
+    list,
+    h("div", { class: "composer" },
+      h("button", { class: "cbtn", "aria-label": "Envoyer une photo", onclick: () => img.click() }, "📷"),
+      h("button", { class: "cbtn", "aria-label": "Partager un document", onclick: shareDoc }, "📄"),
+      text, img,
+      h("button", { class: "cbtn send", "aria-label": "Envoyer", onclick: () => send() }, "➤")),
+  ];
+}

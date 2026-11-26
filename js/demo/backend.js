@@ -4,7 +4,7 @@ import { analyze, norm, TYPE_LABELS } from "./recognize.js";
 import { detectQuad, loadBitmap, processImage } from "./image.js";
 import { makeSeedPages, SEED } from "./seed.js";
 
-const KEY = "miff-demo-db-v1", SESSION = "miff-demo-user";
+const KEY = "miff-demo-db-v2", SESSION = "miff-demo-user";
 
 const RELATION_GROUPS = {
   parents: "Mes parents", siblings: "Mes frères et sœurs", spouse: "Mon conjoint", children: "Mes enfants",
@@ -55,13 +55,13 @@ async function clearFiles() {
 async function init() {
   if (db) return;
   const raw = localStorage.getItem(KEY);
-  if (raw) { db = JSON.parse(raw); return; }
+  if (raw) { db = { ...EMPTY_EXTRA(), ...JSON.parse(raw) }; return; }
   await seed();
 }
 
 async function seed() {
   await clearFiles();
-  db = { members: [], unions: [], users: [], folders: [], user_defaults: [], groups: [], docs: [], invites: [], uploads: {} };
+  db = { members: [], unions: [], users: [], folders: [], user_defaults: [], groups: [], docs: [], invites: [], uploads: {}, ...EMPTY_EXTRA() };
   let fid = 0;
   FOLDERS.forEach(([slug, name, subs], i) => {
     const pid = ++fid;
@@ -82,9 +82,20 @@ async function seed() {
       mime: "image/jpeg", pages: imgs.length, size: imgs.reduce((a, b) => a + b.size, 0), ocr_text: d.text || "", visibility: d.visibility, targets: d.targets || [],
       created_at: d.created });
   }
+  const ago = (min) => new Date(Date.now() - min * 60000).toISOString().slice(0, 19).replace("T", " ");
+  for (const x of SEED.messages || []) db.messages.push({ id: db.messages.length + 1, chat: x.chat, from_member: x.from, text: x.text, kind: x.kind || "text", member_id: x.member || null, at: ago(x.ago) });
+  for (const r of SEED.requests || []) {
+    const rid = db.requests.length + 1;
+    db.requests.push({ id: rid, doc_id: r.doc, from_member: r.from, reason: r.reason, duration: r.duration, status: "pending", at: ago(r.ago) });
+    const d = db.docs.find((x) => x.id === r.doc); const owner = db.users.find((u) => u.id === d.owner_user_id);
+    const who = db.members.find((x) => x.id === r.from);
+    db.notifs.push({ id: db.notifs.length + 1, member_id: owner.member_id, kind: "request", ref: rid, text: `${who.first_name} demande à voir « ${d.title} »`, link: "#/notifications", at: ago(r.ago), read: false });
+  }
+  db.notifs.push({ id: db.notifs.length + 1, member_id: 8, kind: "birth", text: "Naissance : Aya, fille d'Inès et Thomas", link: "#/personne/23", at: ago(3000), read: true });
   save();
   localStorage.setItem(SESSION, "1");
 }
+const EMPTY_EXTRA = () => ({ messages: [], reads: [], chatgroups: [], requests: [], grants: [], notifs: [] });
 
 // ------------------------------------------------------------ Arbre
 class Tree {
@@ -152,9 +163,14 @@ function allowed(ownerMember, targets, tree) {
   }
   return out;
 }
+const nowS = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+function isMinor(m) { if (!m?.birth_date) return false; const b = new Date(m.birth_date); const t = new Date(); t.setFullYear(t.getFullYear() - 18); return b > t; }
+function grantFor(user, d) { const n = nowS(); return db.grants.find((g) => g.doc_id === d.id && g.member_id === user.member_id && (!g.until || g.until > n)); }
 function canView(user, d, tree) {
   if (d.owner_user_id === user.id) return true;
   if (d.person_id && d.person_id === user.member_id) return true;
+  if (d.person_id && tree.parents(d.person_id).has(user.member_id) && isMinor(tree.m.get(d.person_id))) return true;
+  if (grantFor(user, d)) return true;
   if (d.visibility === "family") return true;
   if (d.visibility === "custom") {
     const owner = db.users.find((u) => u.id === d.owner_user_id);
@@ -176,6 +192,14 @@ function docPublic(d, user) {
     person_name: p ? `${p.first_name} ${p.last_name}`.trim() : "", mine: d.owner_user_id === user.id, owner_name: om?.first_name || "" };
 }
 
+function lockedPublic(d, user) {
+  const base = docPublic(d, user);
+  const label = base.doc_type_label || "Document";
+  const mine = db.requests.filter((r) => r.doc_id === d.id && r.from_member === user.member_id).sort((a, b) => b.id - a.id)[0];
+  return { id: d.id, locked: true, title: `${label}${d.year ? " " + d.year : ""}`, doc_type_label: label, folder_id: d.folder_id, folder_name: base.folder_name, parent_folder_name: base.parent_folder_name,
+    person_id: d.person_id, person_name: base.person_name, year: d.year, owner_name: base.owner_name, visibility: d.visibility, targets: [], created_at: d.created_at, pages: 0, mine: false,
+    request: mine ? { status: mine.status, at: mine.at, answer: mine.answer || "" } : null };
+}
 function parseVis(v) { v = v || "private"; if (v.startsWith("custom:")) return ["custom", v.slice(7).split(",").filter(Boolean)]; return [["private", "family"].includes(v) ? v : "private", []]; }
 const fmtVis = (vis, t) => (vis === "custom" ? "custom:" + t.join(",") : vis);
 const cleanTargets = (ts) => (ts || []).filter((t) => { const [k, v] = t.split(":"); return (k === "rel" && RELATION_GROUPS[v]) || (["mem", "grp"].includes(k) && /^\d+$/.test(v)); });
@@ -219,6 +243,89 @@ async function toJpeg(blob, max = 2400) {
   const c = document.createElement("canvas"); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
   c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
   return new Promise((r) => c.toBlob(r, "image/jpeg", 0.85));
+}
+
+
+// ------------------------------------------------------------ Chat, demandes, notifications
+function frShort(s) { const d = new Date(String(s).length === 10 ? s + "T12:00:00" : String(s).replace(" ", "T") + "Z"); return isNaN(d) ? s : d.toLocaleDateString("fr-FR", { day: "numeric", month: "long" }); }
+function notify(memberId, kind, text, link, ref = null) {
+  if (!db.users.some((u) => u.member_id === memberId)) return;
+  db.notifs.push({ id: nextId("notifs"), member_id: memberId, kind, text, link, ref, at: nowS(), read: false });
+}
+function requestPublic(r, tree) {
+  const d = db.docs.find((x) => x.id === r.doc_id);
+  return { id: r.id, doc_id: r.doc_id, doc_title: d?.title || "Document", from_member: r.from_member, from_name: tree.m.get(r.from_member)?.first_name || "?",
+    reason: r.reason, duration: r.duration, status: r.status, answer: r.answer || "", until: r.until || null, at: r.at };
+}
+const pairKey = (a, b) => [a || 0, b || 0].join("-");
+// Discussions automatiques, calculées à partir de l'arbre.
+function autoChats(mid, tree) {
+  const out = [{ key: "fam", name: "Toute la famille", kind: "auto", members: new Set(db.members.map((x) => x.id)) }];
+  const me = tree.m.get(mid); if (!me) return out;
+  const sibs = tree.siblings(mid);
+  if (sibs.size && (me.father_id || me.mother_id)) out.push({ key: `sib:${pairKey(me.father_id, me.mother_id)}`, name: "Frères et sœurs", kind: "auto", members: new Set([mid, ...sibs]) });
+  const seen = new Set();
+  for (const p of [me.father_id, me.mother_id].filter(Boolean)) {
+    const pm = tree.m.get(p); if (!pm || !(pm.father_id || pm.mother_id)) continue;
+    const key = `cou:${pairKey(pm.father_id, pm.mother_id)}`; if (seen.has(key)) continue; seen.add(key);
+    const gps = [pm.father_id, pm.mother_id].filter(Boolean);
+    const members = new Set(); for (const g of gps) for (const c of tree.grandchildren(g)) members.add(c);
+    if (members.size > sibs.size + 1) {
+      const side = p === me.father_id ? "côté papa" : "côté maman";
+      out.push({ key, name: `Cousins ${side}`, kind: "auto", members });
+    }
+  }
+  if (me.father_id || me.mother_id) {
+    const members = new Set([mid, ...sibs, me.father_id, me.mother_id].filter(Boolean));
+    if (members.size > 1) out.push({ key: `foy:${pairKey(me.father_id, me.mother_id)}`, name: "Parents et enfants", kind: "auto", members });
+  }
+  const kids = tree.children(mid);
+  if (kids.size) {
+    const sp = [...tree.spouses(mid)].find((s) => [...kids].some((k) => tree.parents(k).has(s)));
+    const f = me.sex === "F" ? sp : mid, mo = me.sex === "F" ? mid : sp;
+    out.push({ key: `foy:${pairKey(f, mo)}`, name: "Mon foyer", kind: "auto", members: new Set([mid, sp, ...kids].filter(Boolean)) });
+  }
+  return out;
+}
+function chatInfo(key, user, tree) {
+  const mid = user.member_id;
+  let c = autoChats(mid, tree).find((x) => x.key === key);
+  if (!c && key.startsWith("dm:")) {
+    const [a, b] = key.slice(3).split("-").map(Number);
+    if ((a === mid || b === mid) && tree.m.has(a) && tree.m.has(b) && a < b) { const o = a === mid ? b : a; c = { key, name: tree.m.get(o).first_name, kind: "dm", other: o, members: new Set([a, b]) }; }
+  }
+  if (!c && key.startsWith("grp:")) {
+    const g = db.chatgroups.find((x) => x.id === Number(key.slice(4)));
+    if (g && g.member_ids.includes(mid)) c = { key, name: g.name, kind: "group", members: new Set(g.member_ids) };
+  }
+  if (!c && /^(sib|cou|foy):/.test(key)) {
+    // Discussion automatique d'une autre branche : seulement si on en fait partie.
+    for (const x of db.members) { const k = autoChats(x.id, tree).find((y) => y.key === key); if (k && k.members.has(mid)) { c = { ...k, name: k.name }; break; } }
+  }
+  return c || null;
+}
+function chatList(user, tree) {
+  const mid = user.member_id;
+  const list = autoChats(mid, tree);
+  const keys = new Set(list.map((c) => c.key));
+  for (const x of db.messages) if (!keys.has(x.chat) && (x.chat.startsWith("dm:") || x.chat.startsWith("grp:"))) { const c = chatInfo(x.chat, user, tree); if (c) { list.push(c); keys.add(c.key); } }
+  for (const g of db.chatgroups) if (g.member_ids.includes(mid) && !keys.has(`grp:${g.id}`)) { list.push(chatInfo(`grp:${g.id}`, user, tree)); keys.add(`grp:${g.id}`); }
+  return list.map((c) => {
+    const msgs = db.messages.filter((x) => x.chat === c.key);
+    const last = msgs.reduce((a, x) => (!a || x.id > a.id ? x : a), null);
+    const rd = db.reads.find((r) => r.member_id === mid && r.chat === c.key)?.last || 0;
+    const unread = msgs.filter((x) => x.id > rd && x.from_member !== mid).length;
+    const who = last ? tree.m.get(last.from_member)?.first_name : "";
+    const preview = last ? (last.kind === "birth" ? `👶 Naissance de ${tree.m.get(last.member_id)?.first_name || ""}` : last.doc_id ? "📄 Document partagé" : last.has_image && !last.text ? "📷 Photo" : last.text) : "";
+    return { key: c.key, name: c.name, kind: c.kind, other: c.other || null, member_count: c.members.size, member_names: [...c.members].map((i) => tree.m.get(i)?.first_name).filter(Boolean).slice(0, 8),
+      last_at: last?.at || "", last_text: last ? (last.from_member === mid ? "Vous : " : who + " : ") + preview : "", unread };
+  }).sort((a, b) => (b.last_at || "").localeCompare(a.last_at || "") || (a.kind === "auto" ? -1 : 1));
+}
+function messagePublic(x, user, tree) {
+  const out = { id: x.id, from_member: x.from_member, from_name: tree.m.get(x.from_member)?.first_name || "?", mine: x.from_member === user.member_id, text: x.text, kind: x.kind, has_image: !!x.has_image, at: x.at };
+  if (x.kind === "birth") { const b = tree.m.get(x.member_id); if (b) out.baby = { id: b.id, first_name: b.first_name, birth_date: b.birth_date, sex: b.sex, parents: [...tree.parents(b.id)].map((i) => tree.m.get(i)?.first_name) }; }
+  if (x.doc_id) { const d = db.docs.find((y) => y.id === x.doc_id); if (d) out.doc = canView(user, d, tree) ? { id: d.id, title: d.title, locked: false } : d.hidden ? null : { id: d.id, title: lockedPublic(d, user).title, locked: true }; }
+  return out;
 }
 
 // ------------------------------------------------------------ Routes
@@ -312,7 +419,7 @@ export async function handle(method, url, body) {
     const id = Number(m[1]); const x = db.members.find((y) => y.id === id); if (!x) fail(404, "Personne introuvable");
     if (method === "GET") {
       const gens = tree.generations();
-      const docs = db.docs.filter((d) => d.person_id === id && canView(user, d, tree)).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((d) => docPublic(d, user));
+      const docs = db.docs.filter((d) => d.person_id === id && (canView(user, d, tree) || !d.hidden)).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((d) => canView(user, d, tree) ? docPublic(d, user) : lockedPublic(d, user));
       return { ...memberPublic(x, tree, user.member_id, gens, accs), parents: [...tree.parents(id)], children: [...tree.children(id)], siblings: [...tree.siblings(id)], documents: docs,
         can_edit: user.is_admin || id === user.member_id || !accs.has(id) };
     }
@@ -333,12 +440,16 @@ export async function handle(method, url, body) {
 
   // Dossiers et documents
   const visible = () => db.docs.filter((d) => canView(user, d, tree));
+  const lockedDocs = () => db.docs.filter((d) => !d.hidden && !canView(user, d, tree));
   if (path === "/api/folders") {
     const gens = tree.generations();
     let docs = visible();
+    let all = docs.concat(lockedDocs());
+    if (q.get("person")) all = all.filter((d) => d.person_id === Number(q.get("person")));
+    else if (q.get("generation") !== null && q.get("generation") !== "") all = all.filter((d) => d.person_id && gens.get(d.person_id) === Number(q.get("generation")));
     if (q.get("person")) docs = docs.filter((d) => d.person_id === Number(q.get("person")));
     else if (q.get("generation") !== null && q.get("generation") !== "") docs = docs.filter((d) => d.person_id && gens.get(d.person_id) === Number(q.get("generation")));
-    const counts = {}; for (const d of docs) counts[d.folder_id] = (counts[d.folder_id] || 0) + 1;
+    const counts = {}; for (const d of all) counts[d.folder_id] = (counts[d.folder_id] || 0) + 1;
     const tops = db.folders.filter((f) => !f.parent_id).map((f) => { const ch = db.folders.filter((s) => s.parent_id === f.id).map((s) => ({ ...s, count: counts[s.id] || 0 })); return { ...f, children: ch, count: ch.reduce((a, s) => a + s.count, 0) }; });
     const my = gens.get(user.member_id) || 0;
     return { folders: tops, generations: [...new Set(gens.values())].sort((a, b) => a - b).map((g) => ({ value: g, label: genLabel(g, my) })), my_generation: my,
@@ -353,7 +464,15 @@ export async function handle(method, url, body) {
     if (q.get("scope") === "shared") docs = docs.filter((d) => d.owner_user_id !== user.id);
     if (q.get("generation") !== null && q.get("generation") !== "" && !q.get("person")) { const gens = tree.generations(); docs = docs.filter((d) => d.person_id && gens.get(d.person_id) === Number(q.get("generation"))); }
     if ((q.get("q") || "").trim()) { const nq = norm(q.get("q").trim()); docs = docs.filter((d) => norm(d.title + " " + d.ocr_text + " " + JSON.stringify(d.fields)).includes(nq)); }
-    return docs.sort((a, b) => b.created_at.localeCompare(a.created_at)).map((d) => docPublic(d, user));
+    let out = docs.map((d) => docPublic(d, user));
+    if ((folder || q.get("person")) && !q.get("scope") && !(q.get("q") || "").trim()) {
+      let lk = lockedDocs();
+      if (folder) { const subs = db.folders.filter((f) => f.parent_id === folder).map((f) => f.id); lk = lk.filter((d) => d.folder_id === folder || subs.includes(d.folder_id)); }
+      if (q.get("person")) lk = lk.filter((d) => d.person_id === Number(q.get("person")));
+      if (q.get("generation") !== null && q.get("generation") !== "" && !q.get("person")) { const gens = tree.generations(); lk = lk.filter((d) => d.person_id && gens.get(d.person_id) === Number(q.get("generation"))); }
+      out = out.concat(lk.map((d) => lockedPublic(d, user)));
+    }
+    return out.sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
   const getDoc = (id, own) => {
     const d = db.docs.find((x) => x.id === id);
@@ -370,7 +489,15 @@ export async function handle(method, url, body) {
   if (R(/^\/api\/documents\/(\d+)$/)) {
     const id = Number(m[1]);
     if (method === "GET") {
+      const raw = db.docs.find((x) => x.id === id);
+      if (raw && !raw.hidden && !canView(user, raw, tree)) return lockedPublic(raw, user);
       const d = getDoc(id); const out = docPublic(d, user);
+      if (out.mine) {
+        const n = nowS();
+        out.grants = db.grants.filter((g) => g.doc_id === id && (!g.until || g.until > n)).map((g) => ({ member_id: g.member_id, name: tree.m.get(g.member_id)?.first_name || "?", until: g.until }));
+        out.pending_requests = db.requests.filter((r) => r.doc_id === id && r.status === "pending").map((r) => requestPublic(r, tree));
+      }
+      const g = grantFor(user, d); if (g && !out.mine) out.granted_until = g.until;
       if (d.visibility === "custom") { const owner = db.users.find((x) => x.id === d.owner_user_id); out.seen_by = [...allowed(owner.member_id, d.targets, tree)].map((i) => tree.m.get(i)?.first_name).filter(Boolean).sort(); }
       return out;
     }
@@ -380,6 +507,7 @@ export async function handle(method, url, body) {
       if ("person_id" in body) d.person_id = body.person_id;
       if (body.fields) d.fields = cleanFields(body.fields);
       if (body.visibility) { d.visibility = ["private", "family", "custom"].includes(body.visibility) ? body.visibility : "private"; d.targets = d.visibility === "custom" ? cleanTargets(body.targets) : []; }
+      if ("hidden" in body) d.hidden = !!body.hidden && d.visibility !== "family";
       save(); return { ok: true };
     }
     if (method === "DELETE") { getDoc(id, true); db.docs = db.docs.filter((x) => x.id !== id); save(); return { ok: true }; }
@@ -392,8 +520,129 @@ export async function handle(method, url, body) {
     if (up.mime === "application/pdf") await putFile(`doc-${id}-pdf`, await getFile(`up-${body.upload_id}-pdf`));
     db.docs.push({ id, owner_user_id: user.id, person_id: body.person_id, folder_id: body.folder_id, title: (body.title || "Document").slice(0, 150), doc_type: body.doc_type || "",
       fields: cleanFields(body.fields), year: body.year || "", mime: up.mime, pages: up.pages, size: up.size, ocr_text: up.text, visibility: vis,
-      targets: vis === "custom" ? cleanTargets(body.targets) : [], created_at: new Date().toISOString().slice(0, 19).replace("T", " ") });
+      targets: vis === "custom" ? cleanTargets(body.targets) : [], hidden: !!body.hidden && vis !== "family", created_at: new Date().toISOString().slice(0, 19).replace("T", " ") });
     delete db.uploads[body.upload_id]; save(); return { id };
+  }
+
+  // Notifications
+  if (path === "/api/badges") {
+    const notifs = db.notifs.filter((n) => n.member_id === user.member_id && !n.read).length;
+    const chats = chatList(user, tree).reduce((a, c) => a + c.unread, 0);
+    return { notifs, chats };
+  }
+  if (path === "/api/notifications" && method === "GET") {
+    const reqs = db.requests.filter((r) => r.status === "pending" && db.docs.find((d) => d.id === r.doc_id)?.owner_user_id === user.id).map((r) => requestPublic(r, tree));
+    const mine = db.requests.filter((r) => r.from_member === user.member_id).sort((a, b) => b.id - a.id).slice(0, 10).map((r) => requestPublic(r, tree));
+    const list = db.notifs.filter((n) => n.member_id === user.member_id).sort((a, b) => b.at.localeCompare(a.at) || b.id - a.id).slice(0, 50);
+    return { requests: reqs, my_requests: mine, notifications: list };
+  }
+  if (path === "/api/notifications/read") { db.notifs.forEach((n) => { if (n.member_id === user.member_id) n.read = true; }); save(); return { ok: true }; }
+
+  // Demandes d'accès
+  if (R(/^\/api\/documents\/(\d+)\/request$/) && method === "POST") {
+    const d = db.docs.find((x) => x.id === Number(m[1]));
+    if (!d || d.hidden) fail(404, "Document introuvable");
+    if (canView(user, d, tree)) fail(400, "Vous voyez déjà ce document.");
+    const reason = (body.reason || "").trim();
+    if (reason.length < 3) fail(400, "Expliquez en quelques mots pourquoi vous en avez besoin.");
+    if (db.requests.some((r) => r.doc_id === d.id && r.from_member === user.member_id && r.status === "pending")) fail(400, "Vous avez déjà une demande en attente pour ce document.");
+    const duration = ["once", "7d", "always"].includes(body.duration) ? body.duration : "7d";
+    const id = nextId("requests");
+    db.requests.push({ id, doc_id: d.id, from_member: user.member_id, reason: reason.slice(0, 500), duration, status: "pending", at: nowS() });
+    const owner = db.users.find((x) => x.id === d.owner_user_id);
+    notify(owner.member_id, "request", `${tree.m.get(user.member_id).first_name} demande à voir « ${d.title} »`, "#/notifications", id);
+    save(); return { id };
+  }
+  if (R(/^\/api\/requests\/(\d+)\/answer$/) && method === "POST") {
+    const r = db.requests.find((x) => x.id === Number(m[1])); if (!r) fail(404, "Demande introuvable");
+    const d = db.docs.find((x) => x.id === r.doc_id);
+    if (!d || d.owner_user_id !== user.id) fail(403, "Seule la personne qui a ajouté le document peut répondre.");
+    if (r.status !== "pending") fail(400, "Cette demande a déjà reçu une réponse.");
+    r.answer = (body.message || "").trim().slice(0, 300); r.answered_at = nowS();
+    if (body.accept) {
+      const duration = ["once", "7d", "always"].includes(body.duration) ? body.duration : r.duration;
+      const until = duration === "always" ? null : new Date(Date.now() + (duration === "once" ? 1 : 7) * 864e5).toISOString().slice(0, 19).replace("T", " ");
+      db.grants = db.grants.filter((g) => !(g.doc_id === d.id && g.member_id === r.from_member));
+      db.grants.push({ doc_id: d.id, member_id: r.from_member, until });
+      r.status = "accepted"; r.until = until;
+      notify(r.from_member, "answer", `${tree.m.get(user.member_id).first_name} a accepté : vous pouvez voir « ${d.title} »${until ? " jusqu'au " + frShort(until) : ""}`, `#/document/${d.id}`);
+    } else {
+      r.status = "refused";
+      notify(r.from_member, "answer", `${tree.m.get(user.member_id).first_name} a refusé votre demande pour « ${d.title} »${r.answer ? " : « " + r.answer + " »" : ""}`, `#/document/${d.id}`);
+    }
+    db.notifs.forEach((n) => { if (n.kind === "request" && n.ref === r.id) n.read = true; });
+    save(); return { ok: true };
+  }
+  if (R(/^\/api\/documents\/(\d+)\/grants\/(\d+)$/) && method === "DELETE") {
+    getDoc(Number(m[1]), true);
+    db.grants = db.grants.filter((g) => !(g.doc_id === Number(m[1]) && g.member_id === Number(m[2]))); save(); return { ok: true };
+  }
+
+  // Naissance
+  if (path === "/api/births" && method === "POST") {
+    const g = (k) => (body instanceof FormData ? body.get(k) : body[k]);
+    const first = (g("first_name") || "").trim(); if (!first) fail(400, "Le prénom du bébé est obligatoire.");
+    const father_id = Number(g("father_id")) || null, mother_id = Number(g("mother_id")) || null;
+    if (!father_id && !mother_id) fail(400, "Choisissez au moins un parent.");
+    const id = nextId("members");
+    const fa = tree.m.get(father_id), mo = tree.m.get(mother_id);
+    db.members.push({ id, first_name: first, last_name: (g("last_name") || fa?.last_name || mo?.last_name || "").trim(), birth_name: "", sex: g("sex") || "", birth_date: g("birth_date") || "",
+      birth_place: (g("birth_place") || "").trim(), death_date: "", deceased: false, notes: "", father_id, mother_id });
+    if (fa && mo && !tree.spouses(father_id).has(mother_id)) db.unions.push({ id: nextId("unions"), a_id: father_id, b_id: mother_id });
+    const names = [fa, mo].filter(Boolean).map((x) => x.first_name).join(" et ");
+    const word = g("sex") === "F" ? "fille" : g("sex") === "M" ? "fils" : "enfant";
+    const mid = nextId("messages");
+    const photo = body instanceof FormData ? body.get("photo") : null;
+    if (photo && photo.size) await putFile(`msg-${mid}`, await toJpeg(photo, 1600));
+    const when = g("birth_date") ? ` le ${frShort(g("birth_date"))}` : "";
+    db.messages.push({ id: mid, chat: "fam", from_member: user.member_id, kind: "birth", member_id: id, has_image: !!(photo && photo.size),
+      text: (g("message") || "").trim() || `${first} est né${g("sex") === "F" ? "e" : ""}${when}${g("birth_place") ? " à " + g("birth_place").trim() : ""}.`, at: nowS() });
+    for (const u of db.users) {
+      if (u.member_id === user.member_id) continue;
+      const isParent = u.member_id === father_id || u.member_id === mother_id;
+      notify(u.member_id, "birth", isParent ? `${tree.m.get(user.member_id).first_name} a ajouté la naissance de ${first}. Vérifiez sa fiche.` : `Naissance : ${first}, ${word} de ${names}`, `#/personne/${id}`);
+    }
+    save(); return { id };
+  }
+
+  // Chat
+  if (path === "/api/chats" && method === "GET") return chatList(user, tree);
+  if (path === "/api/chats" && method === "POST") {
+    const name = (body.name || "").trim(); if (!name) fail(400, "Donnez un nom au groupe.");
+    const ids = [...new Set([user.member_id, ...(body.member_ids || []).map(Number)])].filter((i) => tree.m.has(i));
+    if (ids.length < 2) fail(400, "Choisissez au moins une personne.");
+    const id = nextId("chatgroups"); db.chatgroups.push({ id, name: name.slice(0, 60), member_ids: ids, created_by: user.member_id }); save();
+    return { key: `grp:${id}` };
+  }
+  if (R(/^\/api\/chats\/([\w:-]+)\/image\/(\d+)$/)) {
+    const c = chatInfo(m[1], user, tree); if (!c) fail(404, "Discussion introuvable");
+    const msg = db.messages.find((x) => x.id === Number(m[2]) && x.chat === m[1]); if (!msg) fail(404, "Image introuvable");
+    return (await getFile(`msg-${msg.id}`)) || fail(404, "Image introuvable");
+  }
+  if (R(/^\/api\/chats\/([\w:-]+)$/)) {
+    const key = m[1]; const c = chatInfo(key, user, tree); if (!c) fail(404, "Discussion introuvable");
+    if (method === "GET") {
+      const msgs = db.messages.filter((x) => x.chat === key).sort((a, b) => a.id - b.id).slice(-200);
+      const last = msgs.length ? msgs[msgs.length - 1].id : 0;
+      const rd = db.reads.find((r) => r.member_id === user.member_id && r.chat === key);
+      if (rd) rd.last = last; else db.reads.push({ member_id: user.member_id, chat: key, last });
+      save();
+      return { key, name: c.name, kind: c.kind, members: [...c.members], messages: msgs.map((x) => messagePublic(x, user, tree)) };
+    }
+    if (method === "POST") {
+      const g = (k) => (body instanceof FormData ? body.get(k) : body[k]);
+      const text = (g("text") || "").trim().slice(0, 4000);
+      const docId = Number(g("doc_id")) || null;
+      const img = body instanceof FormData ? body.get("image") : null;
+      if (!text && !docId && !(img && img.size)) fail(400, "Message vide.");
+      if (docId) { const d = db.docs.find((x) => x.id === docId); if (!d || !canView(user, d, tree)) fail(404, "Document introuvable"); }
+      const id = nextId("messages");
+      if (img && img.size) await putFile(`msg-${id}`, await toJpeg(img, 1600));
+      db.messages.push({ id, chat: key, from_member: user.member_id, text, kind: "text", doc_id: docId, has_image: !!(img && img.size), at: nowS() });
+      const rd = db.reads.find((r) => r.member_id === user.member_id && r.chat === key);
+      if (rd) rd.last = id; else db.reads.push({ member_id: user.member_id, chat: key, last: id });
+      save(); return { id };
+    }
   }
 
   // Scanner et envoi

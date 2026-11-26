@@ -71,6 +71,8 @@ const P = {
   lock: "M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4",
   users: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M17 11a3 3 0 1 0 0-6M22 21a6 6 0 0 0-5-6",
   home: "M3 11l9-8 9 8M5 9v12h14V9",
+  chat: "M4 5h16v11H9l-5 4zM8 9h8M8 12h5",
+  bell: "M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0",
 };
 export function icon(name) {
   return s("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" },

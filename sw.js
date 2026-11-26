@@ -1,6 +1,6 @@
 // Miff : met l'appli en cache pour qu'elle s'ouvre vite, même avec un mauvais réseau.
 // Les documents et les données de la famille ne sont jamais mis en cache.
-const CACHE = "miff-v2";
+const CACHE = "miff-v3";
 const BASE = new URL("./", self.location).pathname; // "/" sur le NAS, "/miff-demo/" sur GitHub Pages
 const SHELL = ["", "css/app.css", "js/app.js", "js/api.js", "js/ui.js", "js/tree.js", "js/scanner.js",
   "js/views.js", "fonts/plus-jakarta-sans.woff2", "icons/icon-192.png", "manifest.webmanifest"].map((p) => BASE + p);
