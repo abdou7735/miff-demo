@@ -201,7 +201,7 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
       isCenter ? s("circle", { cx: p.x, cy: p.y, r: R + 5, fill: "none", stroke: "#1f6a4b", "stroke-width": "2", "stroke-dasharray": "4 3" }) : null,
       s("circle", { cx: p.x, cy: p.y, r: R, fill, stroke: isMe ? "#18402f" : "#fff", "stroke-width": "2" }),
       s("text", { x: p.x, y: p.y + 5, "text-anchor": "middle", "font-size": "15", "font-weight": "700", fill: ink }, initials(m)),
-      s("text", { x: p.x, y: p.y + R + 20, "text-anchor": "middle", "font-size": "15", "font-weight": "600", fill: "#14201a" }, trunc(m.first_name, 12)),
+      s("text", { x: p.x, y: p.y + R + 20, "text-anchor": "middle", "font-size": m.first_name.length > 10 ? "13" : "15", "font-weight": "600", fill: "#14201a" }, trunc(m.first_name, 14)),
       sub ? s("text", { x: p.x, y: p.y + R + 37, "text-anchor": "middle", "font-size": "12.5", fill: m.relation && m.relation !== "Moi" ? "#1f6a4b" : "#5b6b63" }, trunc(sub, 14)) : null);
     nodes.append(g);
     const n = hidden.get(m.id);

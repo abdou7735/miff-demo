@@ -40,12 +40,12 @@ export function viewLogin() {
     h("label", { class: "lbl", for: "u" }, "Identifiant"), u,
     h("label", { class: "lbl", for: "p" }, "Mot de passe"), p,
     err, h("button", { class: "btn", type: "submit" }, "Se connecter"),
-    DEMO ? h("div", { class: "hint" }, "Démonstration : identifiant ", h("b", {}, "yanis"), " (ou lina, ines, karim), mot de passe ", h("b", {}, "demo1234"), ".")
+    DEMO ? h("div", { class: "hint" }, "Démonstration : identifiant ", h("b", {}, "ambdoulhafour"), " (ou youssra, ibrahim, ines), mot de passe ", h("b", {}, "demo1234"), ".")
       : h("p", { class: "small", style: "margin-top:18px" }, "Pas encore de compte ? Demandez votre lien d'invitation à l'administrateur de la famille."));
 }
 
 export function viewSetup() {
-  const known = ["Dino", "Malik", "Ibra", "Bébé", "Yusrin", "Yusra", "Yumna", "Yankoub", "Dja", "Saïd", ""];
+  const known = ["Ambdouloih", "Ambdoulhafour", "Youssrine", "Youssra", "Youmna", "Alhadad", "Assad", "Mogni", "Yankoub", "Abder", "Said", ""];
   const f = {};
   const inp = (k, attrs = {}) => (f[k] = h("input", { class: "field", id: k, ...attrs }));
   const sibBox = h("div", { style: "display:grid;gap:8px" });
@@ -549,7 +549,7 @@ export async function viewSettings() {
   if (DEMO) {
     const users = await _a.get("/api/demo/users");
     demoBlock.push(h("div", { class: "card" }, h("h3", {}, "Démonstration : essayer l'appli comme…"),
-      h("p", { class: "small muted", style: "margin:0 0 8px" }, "Changez de personne pour voir que chacun ne voit que les documents qui lui sont partagés. Par exemple, Inès (une cousine) ne voit pas l'acte de naissance que Lina partage avec ses frères, sœur et parents."),
+      h("p", { class: "small muted", style: "margin:0 0 8px" }, "Changez de personne pour voir que chacun ne voit que les documents qui lui sont partagés. Par exemple, Inès (une cousine) ne voit pas l'acte de naissance que Youssra partage avec ses frères, sœurs et parents."),
       h("div", { class: "wrapchips" }, users.map((u) => h("button", { class: `chip ${u.is_me ? "on" : ""}`, onclick: async () => { await _a.post("/api/demo/switch", { user_id: u.id }); location.hash = "#/arbre"; location.reload(); } }, u.first_name))),
       h("button", { class: "btn ghost", onclick: async () => { if (!await ask("Effacer vos essais et remettre la démo à zéro ?")) return; await _a.post("/api/demo/reset"); location.hash = "#/arbre"; location.reload(); } }, "Remettre la démo à zéro")));
   }

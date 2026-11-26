@@ -4,7 +4,7 @@ import { analyze, norm, TYPE_LABELS } from "./recognize.js";
 import { detectQuad, loadBitmap, processImage } from "./image.js";
 import { makeSeedPages, SEED } from "./seed.js";
 
-const KEY = "miff-demo-db-v2", SESSION = "miff-demo-user";
+const KEY = "miff-demo-db-v3", SESSION = "miff-demo-user";
 
 const RELATION_GROUPS = {
   parents: "Mes parents", siblings: "Mes frères et sœurs", spouse: "Mon conjoint", children: "Mes enfants",
@@ -91,7 +91,7 @@ async function seed() {
     const who = db.members.find((x) => x.id === r.from);
     db.notifs.push({ id: db.notifs.length + 1, member_id: owner.member_id, kind: "request", ref: rid, text: `${who.first_name} demande à voir « ${d.title} »`, link: "#/notifications", at: ago(r.ago), read: false });
   }
-  db.notifs.push({ id: db.notifs.length + 1, member_id: 8, kind: "birth", text: "Naissance : Aya, fille d'Inès et Thomas", link: "#/personne/23", at: ago(3000), read: true });
+  db.notifs.push({ id: db.notifs.length + 1, member_id: 9, kind: "birth", text: "Naissance : Aya, fille d'Inès et Thomas", link: "#/personne/31", at: ago(3000), read: true });
   save();
   localStorage.setItem(SESSION, "1");
 }

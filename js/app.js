@@ -61,7 +61,7 @@ async function route() {
     h("div", { class: "topr" },
       h("a", { class: "bell", href: "#/notifications", "aria-label": "Notifications" }, icon("bell"), h("i", { class: "dot", "data-badge": "notifs", hidden: true })),
       h("a", { class: "me", href: "#/reglages", "aria-label": "Mes réglages" }, me.member.first_name, h("span", { class: "av self" }, initials(me.member)))));
-  app.replaceChildren(header, ...(window.MIFF_DEMO ? [h("div", { class: "demobar" }, "Démo : famille inventée, données gardées sur cet appareil.")] : []), main, tabs(tab));
+  app.replaceChildren(header, ...(window.MIFF_DEMO ? [h("div", { class: "demobar" }, "Démo : oncles, cousins et documents inventés. Données gardées sur cet appareil.")] : []), main, tabs(tab));
   try {
     const content = await fn(m);
     if (id !== renderId) return;
