@@ -72,6 +72,8 @@ const P = {
   users: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M17 11a3 3 0 1 0 0-6M22 21a6 6 0 0 0-5-6",
   home: "M3 11l9-8 9 8M5 9v12h14V9",
   chat: "M4 5h16v11H9l-5 4zM8 9h8M8 12h5",
+  search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
+  edit: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
   bell: "M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0",
 };
 export function icon(name) {

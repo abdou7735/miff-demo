@@ -46,8 +46,9 @@ export const SEED = {
     { chat: "fam", from: 22, ago: 3000, kind: "birth", member: 31, text: "Aya est née le 14 septembre à Mamoudzou. La maman et le bébé vont bien !" },
     { chat: "fam", from: 11, ago: 2950, text: "Félicitations Inès et Thomas ! 🎉" },
     { chat: "fam", from: 3, ago: 2900, text: "Mabrouk ! Qu'Allah la protège." },
-    { chat: "sib:3-4", from: 11, ago: 600, text: "Ambdoulhafour, tu peux mettre le livret de famille dans l'appli ? Je n'arrive pas à le retrouver." },
-    { chat: "cou:1-2", from: 22, ago: 180, text: "On fait un repas chez mamie Fatima dimanche ?" },
+    { chat: "dm:9-11", from: 11, ago: 600, text: "Ambdoulhafour, tu peux mettre le livret de famille dans l'appli ? Je n'arrive pas à le retrouver." },
+    { chat: "fam", from: 22, ago: 180, text: "On fait un repas chez mamie Fatima dimanche ?" },
+    { chat: "dm:3-9", from: 3, ago: 1500, text: "Pense à scanner ta carte d'identité avant ton voyage." },
   ],
   // Demandes d'accès en attente.
   requests: [{ doc: 2, from: 22, reason: "Je prépare mon dossier pour une prépa, je voudrais voir comment tu avais présenté tes notes.", duration: "7d", ago: 90 }],

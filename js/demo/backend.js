@@ -4,7 +4,7 @@ import { analyze, norm, TYPE_LABELS } from "./recognize.js";
 import { detectQuad, loadBitmap, processImage } from "./image.js";
 import { makeSeedPages, SEED } from "./seed.js";
 
-const KEY = "miff-demo-db-v3", SESSION = "miff-demo-user";
+const KEY = "miff-demo-db-v4", SESSION = "miff-demo-user";
 
 const RELATION_GROUPS = {
   parents: "Mes parents", siblings: "Mes frères et sœurs", spouse: "Mon conjoint", children: "Mes enfants",
@@ -89,7 +89,9 @@ async function seed() {
     db.requests.push({ id: rid, doc_id: r.doc, from_member: r.from, reason: r.reason, duration: r.duration, status: "pending", at: ago(r.ago) });
     const d = db.docs.find((x) => x.id === r.doc); const owner = db.users.find((u) => u.id === d.owner_user_id);
     const who = db.members.find((x) => x.id === r.from);
-    db.notifs.push({ id: db.notifs.length + 1, member_id: owner.member_id, kind: "request", ref: rid, text: `${who.first_name} demande à voir « ${d.title} »`, link: "#/notifications", at: ago(r.ago), read: false });
+    const dk = dmOf(r.from, owner.member_id);
+    db.messages.push({ id: db.messages.length + 1, chat: dk, from_member: r.from, kind: "request", request_id: rid, text: r.reason, at: ago(r.ago) });
+    db.notifs.push({ id: db.notifs.length + 1, member_id: owner.member_id, kind: "request", ref: rid, text: `${who.first_name} demande à voir « ${d.title} »`, link: `#/chat/${dk}`, at: ago(r.ago), read: false });
   }
   db.notifs.push({ id: db.notifs.length + 1, member_id: 9, kind: "birth", text: "Naissance : Aya, fille d'Inès et Thomas", link: "#/personne/31", at: ago(3000), read: true });
   save();
@@ -258,38 +260,17 @@ function requestPublic(r, tree) {
     reason: r.reason, duration: r.duration, status: r.status, answer: r.answer || "", until: r.until || null, at: r.at };
 }
 const pairKey = (a, b) => [a || 0, b || 0].join("-");
-// Discussions automatiques, calculées à partir de l'arbre.
-function autoChats(mid, tree) {
-  const out = [{ key: "fam", name: "Toute la famille", kind: "auto", members: new Set(db.members.map((x) => x.id)) }];
-  const me = tree.m.get(mid); if (!me) return out;
-  const sibs = tree.siblings(mid);
-  if (sibs.size && (me.father_id || me.mother_id)) out.push({ key: `sib:${pairKey(me.father_id, me.mother_id)}`, name: "Frères et sœurs", kind: "auto", members: new Set([mid, ...sibs]) });
-  const seen = new Set();
-  for (const p of [me.father_id, me.mother_id].filter(Boolean)) {
-    const pm = tree.m.get(p); if (!pm || !(pm.father_id || pm.mother_id)) continue;
-    const key = `cou:${pairKey(pm.father_id, pm.mother_id)}`; if (seen.has(key)) continue; seen.add(key);
-    const gps = [pm.father_id, pm.mother_id].filter(Boolean);
-    const members = new Set(); for (const g of gps) for (const c of tree.grandchildren(g)) members.add(c);
-    if (members.size > sibs.size + 1) {
-      const side = p === me.father_id ? "côté papa" : "côté maman";
-      out.push({ key, name: `Cousins ${side}`, kind: "auto", members });
-    }
-  }
-  if (me.father_id || me.mother_id) {
-    const members = new Set([mid, ...sibs, me.father_id, me.mother_id].filter(Boolean));
-    if (members.size > 1) out.push({ key: `foy:${pairKey(me.father_id, me.mother_id)}`, name: "Parents et enfants", kind: "auto", members });
-  }
-  const kids = tree.children(mid);
-  if (kids.size) {
-    const sp = [...tree.spouses(mid)].find((s) => [...kids].some((k) => tree.parents(k).has(s)));
-    const f = me.sex === "F" ? sp : mid, mo = me.sex === "F" ? mid : sp;
-    out.push({ key: `foy:${pairKey(f, mo)}`, name: "Mon foyer", kind: "auto", members: new Set([mid, sp, ...kids].filter(Boolean)) });
-  }
-  return out;
+// Une seule discussion de groupe : toute la famille. Le reste, ce sont des conversations à deux.
+function autoChats() {
+  return [{ key: "fam", name: "Toute la famille", kind: "family", members: new Set(db.members.map((x) => x.id)) }];
+}
+const dmOf = (a, b) => `dm:${Math.min(a, b)}-${Math.max(a, b)}`;
+function postSystem(chat, from, kind, extra) {
+  db.messages.push({ id: nextId("messages"), chat, from_member: from, kind, text: "", at: nowS(), ...extra });
 }
 function chatInfo(key, user, tree) {
   const mid = user.member_id;
-  let c = autoChats(mid, tree).find((x) => x.key === key);
+  let c = autoChats().find((x) => x.key === key);
   if (!c && key.startsWith("dm:")) {
     const [a, b] = key.slice(3).split("-").map(Number);
     if ((a === mid || b === mid) && tree.m.has(a) && tree.m.has(b) && a < b) { const o = a === mid ? b : a; c = { key, name: tree.m.get(o).first_name, kind: "dm", other: o, members: new Set([a, b]) }; }
@@ -298,15 +279,11 @@ function chatInfo(key, user, tree) {
     const g = db.chatgroups.find((x) => x.id === Number(key.slice(4)));
     if (g && g.member_ids.includes(mid)) c = { key, name: g.name, kind: "group", members: new Set(g.member_ids) };
   }
-  if (!c && /^(sib|cou|foy):/.test(key)) {
-    // Discussion automatique d'une autre branche : seulement si on en fait partie.
-    for (const x of db.members) { const k = autoChats(x.id, tree).find((y) => y.key === key); if (k && k.members.has(mid)) { c = { ...k, name: k.name }; break; } }
-  }
   return c || null;
 }
 function chatList(user, tree) {
   const mid = user.member_id;
-  const list = autoChats(mid, tree);
+  const list = autoChats();
   const keys = new Set(list.map((c) => c.key));
   for (const x of db.messages) if (!keys.has(x.chat) && (x.chat.startsWith("dm:") || x.chat.startsWith("grp:"))) { const c = chatInfo(x.chat, user, tree); if (c) { list.push(c); keys.add(c.key); } }
   for (const g of db.chatgroups) if (g.member_ids.includes(mid) && !keys.has(`grp:${g.id}`)) { list.push(chatInfo(`grp:${g.id}`, user, tree)); keys.add(`grp:${g.id}`); }
@@ -316,7 +293,7 @@ function chatList(user, tree) {
     const rd = db.reads.find((r) => r.member_id === mid && r.chat === c.key)?.last || 0;
     const unread = msgs.filter((x) => x.id > rd && x.from_member !== mid).length;
     const who = last ? tree.m.get(last.from_member)?.first_name : "";
-    const preview = last ? (last.kind === "birth" ? `👶 Naissance de ${tree.m.get(last.member_id)?.first_name || ""}` : last.doc_id ? "📄 Document partagé" : last.has_image && !last.text ? "📷 Photo" : last.text) : "";
+    const preview = last ? (last.kind === "request" ? "🔑 Demande d'accès à un document" : last.kind === "answer" ? "🔑 Réponse à la demande" : last.kind === "birth" ? `👶 Naissance de ${tree.m.get(last.member_id)?.first_name || ""}` : last.doc_id ? "📄 Document partagé" : last.has_image && !last.text ? "📷 Photo" : last.text) : "";
     return { key: c.key, name: c.name, kind: c.kind, other: c.other || null, member_count: c.members.size, member_names: [...c.members].map((i) => tree.m.get(i)?.first_name).filter(Boolean).slice(0, 8),
       last_at: last?.at || "", last_text: last ? (last.from_member === mid ? "Vous : " : who + " : ") + preview : "", unread };
   }).sort((a, b) => (b.last_at || "").localeCompare(a.last_at || "") || (a.kind === "auto" ? -1 : 1));
@@ -324,6 +301,11 @@ function chatList(user, tree) {
 function messagePublic(x, user, tree) {
   const out = { id: x.id, from_member: x.from_member, from_name: tree.m.get(x.from_member)?.first_name || "?", mine: x.from_member === user.member_id, text: x.text, kind: x.kind, has_image: !!x.has_image, at: x.at };
   if (x.kind === "birth") { const b = tree.m.get(x.member_id); if (b) out.baby = { id: b.id, first_name: b.first_name, birth_date: b.birth_date, sex: b.sex, parents: [...tree.parents(b.id)].map((i) => tree.m.get(i)?.first_name) }; }
+  if (x.kind === "request" || x.kind === "answer") {
+    const r = db.requests.find((y) => y.id === x.request_id);
+    if (r) { out.request = requestPublic(r, tree); out.request.can_answer = r.status === "pending" && db.docs.find((d) => d.id === r.doc_id)?.owner_user_id === user.id; }
+    return out;
+  }
   if (x.doc_id) { const d = db.docs.find((y) => y.id === x.doc_id); if (d) out.doc = canView(user, d, tree) ? { id: d.id, title: d.title, locked: false } : d.hidden ? null : { id: d.id, title: lockedPublic(d, user).title, locked: true }; }
   return out;
 }
@@ -339,7 +321,7 @@ function me() {
 export async function handle(method, url, body) {
   await init();
   const u = new URL(url, location.origin);
-  const path = u.pathname, q = u.searchParams;
+  const path = decodeURIComponent(u.pathname), q = u.searchParams;
   let m;
   const R = (re) => (m = path.match(re));
 
@@ -550,7 +532,8 @@ export async function handle(method, url, body) {
     const id = nextId("requests");
     db.requests.push({ id, doc_id: d.id, from_member: user.member_id, reason: reason.slice(0, 500), duration, status: "pending", at: nowS() });
     const owner = db.users.find((x) => x.id === d.owner_user_id);
-    notify(owner.member_id, "request", `${tree.m.get(user.member_id).first_name} demande à voir « ${d.title} »`, "#/notifications", id);
+    postSystem(dmOf(user.member_id, owner.member_id), user.member_id, "request", { request_id: id, text: reason.slice(0, 500) });
+    notify(owner.member_id, "request", `${tree.m.get(user.member_id).first_name} demande à voir « ${d.title} »`, `#/chat/${dmOf(user.member_id, owner.member_id)}`, id);
     save(); return { id };
   }
   if (R(/^\/api\/requests\/(\d+)\/answer$/) && method === "POST") {
@@ -570,6 +553,7 @@ export async function handle(method, url, body) {
       r.status = "refused";
       notify(r.from_member, "answer", `${tree.m.get(user.member_id).first_name} a refusé votre demande pour « ${d.title} »${r.answer ? " : « " + r.answer + " »" : ""}`, `#/document/${d.id}`);
     }
+    postSystem(dmOf(user.member_id, r.from_member), user.member_id, "answer", { request_id: r.id, text: r.answer || "" });
     db.notifs.forEach((n) => { if (n.kind === "request" && n.ref === r.id) n.read = true; });
     save(); return { ok: true };
   }

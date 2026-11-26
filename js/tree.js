@@ -3,7 +3,7 @@
 // et « tout l'arbre » (génération par génération).
 import { s, initials, years } from "./ui.js";
 
-const NODE_W = 104, ROW_H = 140, R = 30, TOP = 64, GAP = 24;
+const NODE_W = 104, ROW_H = 140, R = 30, TOP = 64, GAP = 24, GRID_ROW = 112, PAD = 10;
 
 // Qui montrer selon le niveau : 1 = proche, 2 = famille, 3 = tout.
 export function circle(members, centerId, level) {
@@ -67,9 +67,21 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
     for (const sp of T.spouses(id)) if (!placed.has(sp) && spouseOk(sp)) { placed.add(sp); unit.push(sp); }
     const kidSet = new Set();
     for (const u of unit) for (const k of T.children(u)) if (!placed.has(k)) kidSet.add(k);
+    const order = sortKids([...kidSet]);
+    // Une grande fratrie sans enfants ni conjoints affichés : rangée en grille, dans un cadre.
+    const isLeaf = (k) => !T.children(k).length && !T.spouses(k).some((s) => !placed.has(s));
+    const leaves = order.filter(isLeaf);
     const kids = [];
-    for (const k of sortKids([...kidSet])) if (!placed.has(k)) kids.push(build(k, depth + 1, spouseOk));
-    const kidsW = kids.reduce((a, k) => a + k.w, 0) + Math.max(0, kids.length - 1) * 0;
+    if (leaves.length > 4) {
+      leaves.forEach((k) => placed.add(k));
+      const cols = leaves.length <= 6 ? 3 : 4;
+      const grid = { grid: leaves, cols, rows: Math.ceil(leaves.length / cols), w: cols * NODE_W + 2 * PAD + GAP };
+      for (const k of order) if (!placed.has(k)) kids.push(build(k, depth + 1, spouseOk));
+      kids.splice(Math.floor(kids.length / 2), 0, grid);
+    } else {
+      for (const k of order) if (!placed.has(k)) kids.push(build(k, depth + 1, spouseOk));
+    }
+    const kidsW = kids.reduce((a, k) => a + k.w, 0);
     return { unit, kids, depth, w: Math.max(unit.length * NODE_W, kidsW) };
   }
 
@@ -112,18 +124,30 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
   // Placement horizontal.
   const pos = new Map();
   const units = [];
+  const grids = [];
+  const gridOf = new Map();
   const genOf = (id) => by.get(id).generation || 0;
   function place(node, x0) {
+    if (node.grid) {
+      const g = genOf(node.grid[0]);
+      const gx = x0 + GAP / 2 + PAD;
+      node.grid.forEach((id, i) => { pos.set(id, { x: gx + NODE_W / 2 + (i % node.cols) * NODE_W, g, off: Math.floor(i / node.cols) }); gridOf.set(id, node); });
+      // Dernière ligne incomplète : centrée.
+      const lastN = node.grid.length % node.cols;
+      if (lastN) node.grid.slice(-lastN).forEach((id) => { pos.get(id).x += (node.cols - lastN) * NODE_W / 2; });
+      node.cx = gx + node.cols * NODE_W / 2; node.x0 = gx - PAD; node.g = g;
+      grids.push(node);
+      return;
+    }
     const y = genOf(node.unit[0]);
     let kx = x0 + (node.w - node.kids.reduce((a, k) => a + k.w, 0)) / 2;
     for (const k of node.kids) { place(k, kx); kx += k.w; }
     let cx;
-    if (node.kids.length) {
-      const first = pos.get(node.kids[0].unit[0]).x, last = pos.get(node.kids[node.kids.length - 1].unit[0]).x;
-      cx = (first + last) / 2;
-    } else cx = x0 + node.w / 2;
+    if (node.kids.length) cx = (node.kids[0].cx + node.kids[node.kids.length - 1].cx) / 2;
+    else cx = x0 + node.w / 2;
     const uw = node.unit.length * NODE_W;
-    node.unit.forEach((id, i) => pos.set(id, { x: cx - uw / 2 + NODE_W / 2 + i * NODE_W, g: y }));
+    node.unit.forEach((id, i) => pos.set(id, { x: cx - uw / 2 + NODE_W / 2 + i * NODE_W, g: y, off: 0 }));
+    node.cx = cx;
     units.push(node.unit);
   }
   let x = 0;
@@ -144,7 +168,7 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
   }
   for (const g of gpUnits) {
     const uw = g.unit.length * NODE_W;
-    g.unit.forEach((id, i) => pos.set(id, { x: g.cx - uw / 2 + NODE_W / 2 + i * NODE_W, g: genOf(id) }));
+    g.unit.forEach((id, i) => pos.set(id, { x: g.cx - uw / 2 + NODE_W / 2 + i * NODE_W, g: genOf(id), off: 0 }));
     units.push(g.unit);
   }
 
@@ -152,8 +176,14 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
   const xs = [...pos.values()].map((p) => p.x), gs = [...pos.values()].map((p) => p.g);
   const minX = Math.min(...xs) - NODE_W / 2 - 10, maxX = Math.max(...xs) + NODE_W / 2 + 10;
   const minG = Math.min(...gs), maxG = Math.max(...gs);
-  for (const p of pos.values()) { p.x -= minX; p.y = TOP + (p.g - minG) * ROW_H; }
-  const W = Math.max(maxX - minX, 320), H = TOP + (maxG - minG) * ROW_H + 80;
+  // Hauteur de chaque génération : plus grande quand une grille y prend plusieurs lignes.
+  const gridExtra = new Map();
+  for (const gr of grids) gridExtra.set(gr.g, Math.max(gridExtra.get(gr.g) || 0, gr.rows - 1));
+  const rowY = new Map(); let yAcc = TOP;
+  for (let g = minG; g <= maxG; g++) { rowY.set(g, yAcc); yAcc += ROW_H + (gridExtra.get(g) || 0) * GRID_ROW; }
+  for (const p of pos.values()) { p.x -= minX; p.y = rowY.get(p.g) + p.off * GRID_ROW; }
+  for (const gr of grids) { gr.x0 -= minX; gr.cx -= minX; gr.top = rowY.get(gr.g) - R - PAD; }
+  const W = Math.max(maxX - minX, 320), H = yAcc - ROW_H + 80;
 
   const me = by.get(meId);
   const sib = new Set(me ? T.siblings(meId) : []);
@@ -172,12 +202,18 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
     const px0 = parentsOf(kids[0]);
     const px = px0.length > 1 ? (px0[0] + px0[1]) / 2 : px0[0];
     const pair = px0.length > 1;
-    const busY = ps[0].y + ROW_H - R - 22;
-    const kx = kids.map((k) => pos.get(k));
+    const busY = ps[0].y + ROW_H - R - 24;
+    const seenGrid = new Set();
+    const kx = [];
+    for (const k of kids) {
+      const gr = gridOf.get(k);
+      if (gr) { if (!seenGrid.has(gr)) { seenGrid.add(gr); kx.push({ x: gr.cx, top: gr.top }); } }
+      else { const q = pos.get(k); kx.push({ x: q.x, top: q.y - R }); }
+    }
     lines.append(s("path", { d: `M${px} ${ps[0].y + (pair ? 0 : R)}V${busY}` }));
     const a = Math.min(px, ...kx.map((k) => k.x)), b = Math.max(px, ...kx.map((k) => k.x));
     if (b > a) lines.append(s("path", { d: `M${a} ${busY}H${b}` }));
-    for (const k of kx) lines.append(s("path", { d: `M${k.x} ${busY}V${k.y - R}` }));
+    for (const k of kx) lines.append(s("path", { d: `M${k.x} ${busY}V${k.top}` }));
   }
 
   // Conjoints placés loin l'un de l'autre (familles différentes) : trait pointillé.
@@ -213,7 +249,9 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
         s("text", { x: bx + 13, y: by2 + 5, "text-anchor": "middle", "font-size": "13", "font-weight": "700", fill: "#1f6a4b" }, `+${n}`)));
     }
   }
-  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, width: W * scale, height: H * scale, role: "img", "aria-label": "Arbre familial" }, lines, nodes);
+  const frames = s("g", {}, grids.map((gr) => s("rect", { x: gr.x0, y: gr.top, width: gr.cols * NODE_W + 2 * PAD, height: (gr.rows - 1) * GRID_ROW + 2 * R + PAD + 52, rx: 22,
+    fill: "#f3f6f4", stroke: "#dfe6e2", "stroke-width": "1.5" })));
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, width: W * scale, height: H * scale, role: "img", "aria-label": "Arbre familial" }, frames, lines, nodes);
   svg._pos = (id) => { const p = pos.get(id); return p ? { x: p.x * scale, y: p.y * scale } : null; };
   return svg;
 }

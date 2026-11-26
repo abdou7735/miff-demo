@@ -36,6 +36,7 @@ function tabs(active) {
 let renderId = 0;
 async function route() {
   const id = ++renderId;
+  document.querySelectorAll(".sheet").forEach((x) => x.remove()); // une feuille ouverte se ferme quand on change d'écran
   const hash = location.hash || "#/arbre";
   const inv = hash.match(/^#\/invitation\/([\w-]+)$/);
   if (inv) { app.replaceChildren(await V.viewInvite(inv[1])); return; }

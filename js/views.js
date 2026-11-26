@@ -673,8 +673,17 @@ function requestSheet(d) {
 }
 
 function requestCard(r, after) {
+  const answer = (accept) => answerSheet(r, accept, after);
+  return h("div", { class: "card req" },
+    h("div", { class: "reqhead" }, av(M(r.from_member)), h("span", {}, h("b", {}, r.from_name), " demande à voir ", h("a", { href: `#/document/${r.doc_id}` }, r.doc_title))),
+    h("blockquote", {}, r.reason),
+    h("div", { class: "small muted" }, `Durée demandée : ${durLabel(r.duration)} · ${frDate(r.at)}`),
+    h("div", { class: "row" }, h("button", { class: "btn", onclick: () => answer(true) }, "Accepter"), h("button", { class: "btn ghost", onclick: () => answer(false) }, "Refuser")));
+}
+
+function answerSheet(r, accept, after) {
   const refresh = () => (after ? after() : window.dispatchEvent(new HashChangeEvent("hashchange")));
-  const answer = (accept) => {
+  {
     let dur = r.duration;
     const msg = h("input", { class: "field", placeholder: accept ? "Un petit mot (facultatif)" : "Pourquoi ? (facultatif)" });
     const opts = h("div", { class: "opts" });
@@ -689,12 +698,7 @@ function requestCard(r, after) {
         catch (x) { toast(x.message); }
       } }, accept ? "Accepter" : "Refuser"),
       h("button", { class: "btn ghost", onclick: () => close() }, "Annuler"));
-  };
-  return h("div", { class: "card req" },
-    h("div", { class: "reqhead" }, av(M(r.from_member)), h("span", {}, h("b", {}, r.from_name), " demande à voir ", h("a", { href: `#/document/${r.doc_id}` }, r.doc_title))),
-    h("blockquote", {}, r.reason),
-    h("div", { class: "small muted" }, `Durée demandée : ${durLabel(r.duration)} · ${frDate(r.at)}`),
-    h("div", { class: "row" }, h("button", { class: "btn", onclick: () => answer(true) }, "Accepter"), h("button", { class: "btn ghost", onclick: () => answer(false) }, "Refuser")));
+  }
 }
 
 // ================================================================ Notifications
@@ -773,41 +777,48 @@ function timeShort(at) {
 export async function viewChats() {
   await loadMembers();
   const list = await api.get("/api/chats");
-  const ic = (c) => c.kind === "dm" ? av(M(c.other)) : h("span", { class: "av grp" }, c.key === "fam" ? "🏠" : c.key.startsWith("sib") ? "👫" : c.key.startsWith("cou") ? "🌳" : c.key.startsWith("foy") ? "👪" : "💬");
+  const meId = state.me.member.id;
+  const fam = list.find((c) => c.kind === "family");
+  const dms = list.filter((c) => c.kind !== "family");
+  const people = state.members.filter((x) => x.id !== meId && x.has_account).sort((a, b) => a.first_name.localeCompare(b.first_name));
+  const box = h("div");
+  const row = (c) => h("a", { class: `chatrow ${c.unread ? "unread" : ""}`, href: `#/chat/${c.key}` },
+    c.kind === "dm" ? av(M(c.other)) : h("span", { class: "av grp" }, "💬"),
+    h("span", { class: "cbody" }, h("span", { class: "ctop" }, h("b", {}, c.name), h("small", {}, timeShort(c.last_at))),
+      h("span", { class: "cbot" }, h("small", {}, c.last_text || "Pas encore de message"), c.unread ? h("em", {}, c.unread) : null)));
+  const render = (q = "") => {
+    const nq = norm(q);
+    const match = (c) => !nq || norm(c.name + " " + c.last_text).includes(nq);
+    const shown = dms.filter(match);
+    const extra = nq ? people.filter((x) => norm(x.first_name).includes(nq) && !dms.some((c) => c.other === x.id)) : [];
+    box.replaceChildren(...[
+      fam && match(fam) ? h("a", { class: "famcard", href: `#/chat/${fam.key}` },
+        h("span", { class: "famic" }, "🏠"),
+        h("span", { class: "cbody" }, h("span", { class: "ctop" }, h("b", {}, "Toute la famille"), h("small", {}, timeShort(fam.last_at))),
+          h("span", { class: "cbot" }, h("small", {}, fam.last_text || `${fam.member_count} personnes`), fam.unread ? h("em", {}, fam.unread) : null))) : null,
+      !nq && people.length ? [h("div", { class: "sectit" }, "Écrire à"), h("div", { class: "avrow" }, people.map((x) =>
+        h("a", { href: `#/chat/${dmKey(meId, x.id)}` }, av(x), h("span", {}, x.first_name))))] : null,
+      h("div", { class: "sectit" }, "Messages"),
+      shown.length || extra.length ? h("div", { class: "chatlist" }, shown.map(row), extra.map((x) => h("a", { class: "chatrow", href: `#/chat/${dmKey(meId, x.id)}` }, av(x),
+        h("span", { class: "cbody" }, h("span", { class: "ctop" }, h("b", {}, x.first_name)), h("span", { class: "cbot" }, h("small", {}, "Nouvelle conversation"))))))
+        : h("div", { class: "empty" }, nq ? "Aucune conversation trouvée." : "Pas encore de conversation. Touchez un prénom ci-dessus pour écrire."),
+    ].flat().filter(Boolean));
+  };
+  render();
   return [
-    h("div", { class: "card", style: "margin-top:0;padding:4px 14px" }, list.map((c) => h("a", { class: "chatrow", href: `#/chat/${c.key}` }, ic(c),
-      h("span", {}, h("b", {}, c.name), h("small", {}, c.last_text || (c.kind === "auto" ? c.member_names.join(", ") + (c.member_count > 8 ? "…" : "") : "Pas encore de message"))),
-      h("span", { class: "meta" }, h("small", {}, timeShort(c.last_at)), c.unread ? h("em", {}, c.unread) : null)))),
-    h("div", { class: "hint" }, "Les groupes « Frères et sœurs », « Cousins »… se créent tout seuls à partir de l'arbre. Une naissance ou un mariage les met à jour."),
-    h("div", { class: "row" },
-      h("button", { class: "btn sec", onclick: () => newDmSheet() }, "Écrire à quelqu'un"),
-      h("button", { class: "btn sec", onclick: () => newGroupSheet() }, "Nouveau groupe")),
+    h("label", { class: "searchbar" }, icon("search"), h("input", { type: "search", placeholder: "Rechercher", "aria-label": "Rechercher une conversation", oninput: (e) => render(e.target.value) })),
+    box,
+    h("button", { class: "fab", "aria-label": "Nouveau message", onclick: () => newDmSheet() }, icon("edit")),
   ];
 }
 
 function newDmSheet() {
   const me = state.me.member.id;
-  const close = sheet(h("h2", {}, "Écrire à…"), h("div", { class: "people" },
+  const close = sheet(h("h2", {}, "Nouveau message"), h("div", { class: "people" },
     state.members.filter((x) => x.id !== me && x.has_account).sort((a, b) => a.first_name.localeCompare(b.first_name)).map((x) =>
       h("a", { class: "person", href: `#/chat/${dmKey(me, x.id)}`, onclick: () => close() }, av(x), x.first_name))),
     h("p", { class: "small muted" }, "Seules les personnes qui ont un compte Miff apparaissent ici."),
     h("button", { class: "btn ghost", onclick: () => close() }, "Annuler"));
-}
-
-function newGroupSheet() {
-  const me = state.me.member.id;
-  const sel = new Set();
-  const name = h("input", { class: "field", placeholder: "ex. Organisation du mariage", id: "g-name" });
-  const box = h("div", { class: "wrapchips" });
-  const render = () => box.replaceChildren(...state.members.filter((x) => x.id !== me && x.has_account).sort((a, b) => a.first_name.localeCompare(b.first_name)).map((x) =>
-    h("button", { type: "button", class: `chip ${sel.has(x.id) ? "on" : ""}`, onclick: () => { sel.has(x.id) ? sel.delete(x.id) : sel.add(x.id); render(); } }, x.first_name)));
-  render();
-  const err = h("div");
-  const close = sheet(h("form", { onsubmit: async (e) => {
-    e.preventDefault();
-    try { const r = await api.post("/api/chats", { name: name.value, member_ids: [...sel] }); close(); location.hash = `#/chat/${r.key}`; } catch (x) { err.replaceChildren(errBox(x)); }
-  } }, h("h2", {}, "Nouveau groupe"), h("label", { class: "lbl", for: "g-name" }, "Nom du groupe"), name, h("div", { class: "lbl" }, "Qui est dedans ?"), box, err,
-    h("button", { class: "btn", type: "submit" }, "Créer le groupe"), h("button", { class: "btn ghost", type: "button", onclick: () => close() }, "Annuler")));
 }
 
 let chatTimer = null;
@@ -819,6 +830,23 @@ export async function viewChat(key) {
   const list = h("div", { class: "msgs" });
   let lastId = 0;
   const bubble = (m) => {
+    if ((m.kind === "request" || m.kind === "answer") && m.request) {
+      const r = m.request;
+      const st = { pending: ["En attente", "wait"], accepted: ["Accepté", "ok"], refused: ["Refusé", "no"] }[r.status];
+      if (m.kind === "answer") return h("div", { class: `msg sys ${m.mine ? "mine" : ""}` },
+        h("span", { class: "txt" }, r.status === "accepted" ? `✅ ${m.from_name} a accepté de montrer « ${r.doc_title} »${r.until ? ` jusqu'au ${frDate(r.until)}` : ""}.` : `⛔ ${m.from_name} a refusé de montrer « ${r.doc_title} ».`),
+        m.text ? h("span", { class: "txt" }, `« ${m.text} »`) : null,
+        r.status === "accepted" && !m.mine ? h("a", { class: "linkbtn", href: `#/document/${r.doc_id}` }, "Ouvrir le document") : null,
+        h("small", { class: "time" }, timeShort(m.at)));
+      return h("div", { class: `reqmsg ${m.mine ? "mine" : ""}` },
+        h("div", { class: "rqtop" }, h("span", {}, "🔑 Demande d'accès"), h("span", { class: `pillst ${st[1]}` }, st[0])),
+        h("a", { class: "rqdoc", href: `#/document/${r.doc_id}` }, r.doc_title),
+        h("blockquote", {}, r.reason),
+        h("small", { class: "muted" }, `Durée demandée : ${durLabel(r.duration)} · ${timeShort(m.at)}`),
+        r.can_answer ? h("div", { class: "row" },
+          h("button", { class: "btn", onclick: () => answerSheet(r, true, reload) }, "Accepter"),
+          h("button", { class: "btn ghost", onclick: () => answerSheet(r, false, reload) }, "Refuser")) : null);
+    }
     if (m.kind === "birth" && m.baby) {
       return h("div", { class: "birthcard" },
         m.has_image ? apiImg(`/api/chats/${encodeURIComponent(key)}/image/${m.id}`, { alt: `Photo de ${m.baby.first_name}`, class: "bphoto" }) : h("div", { class: "bemoji" }, "👶"),
@@ -840,6 +868,7 @@ export async function viewChat(key) {
     if (atBottom || !paint.done) requestAnimationFrame(() => window.scrollTo(0, document.body.scrollHeight));
     paint.done = true;
   };
+  const reload = async () => { const d = await api.get(`/api/chats/${encodeURIComponent(key)}`); list.replaceChildren(); lastId = 0; paint(d.messages); refreshBadges(); };
   if (!data.messages.length) list.append(h("div", { class: "empty" }, "Pas encore de message. Dites bonjour !"));
   paint(data.messages);
   clearInterval(chatTimer);
@@ -874,7 +903,8 @@ export async function viewChat(key) {
   }
   const names = data.members.map((i) => M(i)?.first_name).filter(Boolean);
   return [
-    h("div", { class: "chathead" }, h("h2", {}, data.name), h("div", { class: "small muted" }, data.kind === "dm" ? "Discussion privée" : `${names.length} personnes : ${names.slice(0, 10).join(", ")}${names.length > 10 ? "…" : ""}`)),
+    h("div", { class: "chathead" }, data.kind === "dm" ? av(M(data.members.find((i) => i !== state.me.member.id))) : h("span", { class: "av grp" }, data.kind === "family" ? "🏠" : "💬"),
+      h("div", {}, h("h2", {}, data.name), h("div", { class: "small muted" }, data.kind === "dm" ? "Conversation privée" : `${names.length} personnes`))),
     list,
     h("div", { class: "composer" },
       h("button", { class: "cbtn", "aria-label": "Envoyer une photo", onclick: () => img.click() }, "📷"),
