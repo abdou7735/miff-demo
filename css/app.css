@@ -269,15 +269,15 @@ body.inchat main{padding-bottom:calc(150px + var(--safeB))}
 .privrow input { width: 22px; height: 22px; accent-color: var(--green, #1f6b4f); flex: none; }
 
 /* Arbre : espace libre (glisser, pincer, molette) */
-.treecanvas{position:relative;margin:0 -18px;height:min(64vh,640px);min-height:360px;overflow:hidden;touch-action:none;cursor:grab;background:radial-gradient(circle,#e7ece9 1px,transparent 1.2px) 0 0/22px 22px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);user-select:none;-webkit-user-select:none}
+.treecanvas{position:relative;margin:0;border-radius:16px;border:1px solid var(--line);height:min(64vh,640px);min-height:360px;overflow:hidden;touch-action:none;cursor:grab;background:radial-gradient(circle,#e7ece9 1px,transparent 1.2px) 0 0/22px 22px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);user-select:none;-webkit-user-select:none}
 .treecanvas.grabbing{cursor:grabbing}
 .treeworld{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
 .treeworld svg{display:block}
 .treetools{position:absolute;right:10px;bottom:10px;display:flex;gap:6px;z-index:2}
 .treetools button{width:38px;height:38px;border-radius:11px;border:1px solid var(--line);background:rgba(255,255,255,.95);font-size:18px;font-weight:700;color:var(--green);box-shadow:0 2px 8px rgba(0,0,0,.08);cursor:pointer}
-.treecanvas.full{position:fixed;inset:0;margin:0;height:100%;max-height:none;z-index:60;background-color:var(--bg)}
+.treecanvas.full{position:fixed;inset:0;margin:0;height:100% !important;border-radius:0;max-height:none;z-index:60;background-color:var(--bg)}
 body.treefull{overflow:hidden}
 .legend i.me{background:#d6f0e0;box-shadow:inset 0 0 0 2px #1f6a4b}
 .legend i.dead{background:#fff;border:1.5px dashed #9aa5ae;width:9px;height:9px}
-@media(min-width:700px){.treecanvas{width:calc(100vw - 40px);margin-left:calc(50% - 50vw + 20px);margin-right:0;border:1px solid var(--line);border-radius:16px;height:min(70vh,760px)}}
+@media(min-width:700px){.treecanvas{height:min(70vh,760px)}}
 body{overflow-x:hidden}

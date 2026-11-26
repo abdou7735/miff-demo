@@ -118,24 +118,29 @@ export async function viewTree() {
   // La vue : décalage (x, y) et zoom (k). L'arbre est dessiné une fois, on le déplace en entier.
   const v = { x: 0, y: 0, k: 1 };
   let svg = null, W = 0, H = 0;
-  const MIN = 0.25, MAX = 2.5;
+  const MAX = 2.5, M_ = 8;
+  const dims = () => [box.clientWidth || Math.min(window.innerWidth, 560), box.clientHeight || 480];
+  // Zoom minimal : tout l'arbre tient dans le cadre.
+  const fitK = () => { const [bw, bh] = dims(); return Math.min(1, (bw - 2 * M_) / W, (bh - 2 * M_) / H); };
   const apply = () => {
-    const bw = box.clientWidth || 360, bh = box.clientHeight || 480, m = 80;
-    // On garde toujours un bout de l'arbre à l'écran.
-    v.x = Math.min(bw - m, Math.max(m - W * v.k, v.x));
-    v.y = Math.min(bh - m, Math.max(m - H * v.k, v.y));
+    const [bw, bh] = dims();
+    v.k = Math.min(MAX, Math.max(fitK(), v.k));
+    // L'arbre ne sort jamais du cadre : centré s'il est plus petit, bords collés sinon.
+    const w = W * v.k, hh = H * v.k;
+    v.x = w + 2 * M_ <= bw ? (bw - w) / 2 : Math.min(M_, Math.max(bw - w - M_, v.x));
+    v.y = hh + 2 * M_ <= bh ? (bh - hh) / 2 : Math.min(M_, Math.max(bh - hh - M_, v.y));
     world.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.k})`;
   };
   const zoomAt = (k, cx, cy) => {
-    k = Math.min(MAX, Math.max(MIN, k));
+    k = Math.min(MAX, Math.max(fitK(), k));
     v.x = cx - (cx - v.x) * (k / v.k); v.y = cy - (cy - v.y) * (k / v.k); v.k = k; apply();
   };
   const centerOn = (id, fit) => {
-    const bw = box.clientWidth || Math.min(window.innerWidth, 560), bh = box.clientHeight || 480;
-    if (fit) v.k = Math.min(1, Math.max(0.5, (bw - 16) / W));
+    const [bw, bh] = dims();
+    if (fit) { v.k = fitK(); apply(); return; }
     const p = svg._pos(id);
     v.x = p ? bw / 2 - p.x * v.k : (bw - W * v.k) / 2;
-    v.y = p ? bh * 0.4 - p.y * v.k : 16;
+    v.y = p ? bh / 2 - p.y * v.k : M_;
     apply();
   };
   function render(recenter) {
@@ -143,6 +148,13 @@ export async function viewTree() {
     svg = drawTree(state.members, meId, pick, { scale: 1, focus: st.focus, onFamily: openFamily });
     W = Number(svg.getAttribute("width")); H = Number(svg.getAttribute("height"));
     world.replaceChildren(svg);
+    // Le cadre prend la hauteur de l'arbre en entier (sans grand vide), dans la limite de l'écran.
+    requestAnimationFrame(() => {
+      if (box.classList.contains("full")) return;
+      const bw = box.clientWidth || 360, need = H * Math.min(1, (bw - 2 * M_) / W) + 2 * M_;
+      box.style.height = `${Math.round(Math.max(340, Math.min(need, window.innerHeight * 0.7)))}px`;
+      apply();
+    });
     const f = st.focus && M(st.focus);
     const sp = f && (f.spouses || []).map(M).filter(Boolean)[0];
     banner.replaceChildren(...(f ? [h("div", { class: "centerbar" },
@@ -181,7 +193,7 @@ export async function viewTree() {
       moved = true;
       const d = Math.hypot(ps[0][0] - ps[1][0], ps[0][1] - ps[1][1]);
       const cx = (ps[0][0] + ps[1][0]) / 2, cy = (ps[0][1] + ps[1][1]) / 2;
-      const k = Math.min(MAX, Math.max(MIN, drag.k * d / drag.d));
+      const k = Math.min(MAX, Math.max(fitK(), drag.k * d / drag.d));
       // Le point entre les deux doigts reste sous les doigts.
       v.x = cx - (drag.cx - drag.vx) * (k / drag.k); v.y = cy - (drag.cy - drag.vy) * (k / drag.k); v.k = k; apply();
     }
@@ -206,15 +218,16 @@ export async function viewTree() {
   const full = () => {
     const on = !box.classList.contains("full");
     box.classList.toggle("full", on); document.body.classList.toggle("treefull", on);
-    requestAnimationFrame(() => centerOn(st.center, false));
+    requestAnimationFrame(() => centerOn(st.center, true));
   };
   const tools = h("div", { class: "treetools" },
     h("button", { "aria-label": "Dézoomer", onclick: () => zoomBtn(1 / 1.3) }, "−"),
     h("button", { "aria-label": "Zoomer", onclick: () => zoomBtn(1.3) }, "+"),
-    h("button", { "aria-label": "Recentrer sur la personne", onclick: () => centerOn(st.center, true) }, "◎"),
+    h("button", { "aria-label": "Voir tout l'arbre", onclick: () => centerOn(st.center, true) }, "◎"),
     h("button", { "aria-label": "Plein écran", onclick: full }, "⛶"));
   box.append(tools);
   window.addEventListener("keydown", (e) => { if (e.key === "Escape" && box.classList.contains("full")) full(); });
+  window.addEventListener("resize", () => { if (box.isConnected && svg) apply(); });
   window.addEventListener("hashchange", () => document.body.classList.remove("treefull"), { once: true });
 
   const results = h("div", { class: "wrapchips", style: "margin-top:8px" });
@@ -229,7 +242,8 @@ export async function viewTree() {
     for (const focus of [null, ...homesOf(id)]) {
       if (familyView(state.members, meId, focus).shown.has(id)) { st.focus = focus; break; }
     }
-    render(true);
+    render(false);
+    requestAnimationFrame(() => { v.k = Math.max(fitK(), 1); centerOn(id, false); });
   };
   // Les foyers qui peuvent contenir quelqu'un : le sien, puis celui de ses parents, grands-parents…
   const homesOf = (id) => {
