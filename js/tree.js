@@ -51,6 +51,41 @@ export function hiddenCounts(members, shown) {
   return out;
 }
 
+// Une couleur claire par famille (un couple et ses enfants).
+const PALETTE = [
+  ["#d6f0e0", "#1f6a4b"], // vert
+  ["#d6e7fa", "#1f4f86"], // bleu
+  ["#fadbe5", "#8a2c4b"], // rose
+  ["#fbefc6", "#7a5a0c"], // jaune
+  ["#e5dcfa", "#4e3a8a"], // violet
+  ["#fde1c9", "#8a4614"], // orange
+  ["#d2f0ee", "#16645e"], // turquoise
+  ["#e5f2cc", "#4b6418"], // vert pomme
+];
+
+export function familyColors(members, meId) {
+  const by = new Map(members.map((m) => [m.id, m]));
+  const pkey = (m) => (m && (by.has(m.father_id) || by.has(m.mother_id)) ? `${m.father_id || 0}-${m.mother_id || 0}` : null);
+  const kidsOf = new Map();
+  for (const m of members) for (const p of [m.father_id, m.mother_id]) if (by.has(p)) { if (!kidsOf.has(p)) kidsOf.set(p, []); kidsOf.get(p).push(m); }
+  const keyOf = new Map();
+  for (const m of members) {
+    // Sa famille de naissance ; sinon la famille qu'il ou elle a fondée.
+    let k = pkey(m);
+    if (!k && kidsOf.has(m.id)) k = pkey(kidsOf.get(m.id)[0]);
+    if (!k) for (const sp of m.spouses || []) { const o = by.get(sp); if (o && kidsOf.has(o.id)) { k = pkey(kidsOf.get(o.id)[0]); break; } }
+    if (!k) for (const sp of m.spouses || []) { k = pkey(by.get(sp)); if (k) break; }
+    keyOf.set(m.id, k || `solo-${m.id}`);
+  }
+  // Ma famille en vert, les autres dans l'ordre d'arrivée dans l'arbre.
+  const order = [], seen = new Set();
+  const push = (k) => { if (!seen.has(k)) { seen.add(k); order.push(k); } };
+  if (keyOf.has(meId)) push(keyOf.get(meId));
+  for (const m of [...members].sort((a, b) => a.id - b.id)) push(keyOf.get(m.id));
+  const col = new Map(order.map((k, i) => [k, PALETTE[i % PALETTE.length]]));
+  return (id) => col.get(keyOf.get(id)) || PALETTE[0];
+}
+
 export function drawTree(allMembers, meId, onPick, opts = {}) {
   const { scale = 1, centerId = meId, level = 3, onExpand = null } = opts;
   const shown = circle(allMembers, centerId, level);
@@ -185,8 +220,7 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
   for (const gr of grids) { gr.x0 -= minX; gr.cx -= minX; gr.top = rowY.get(gr.g) - R - PAD; }
   const W = Math.max(maxX - minX, 320), H = yAcc - ROW_H + 80;
 
-  const me = by.get(meId);
-  const sib = new Set(me ? T.siblings(meId) : []);
+  const colorOf = familyColors(allMembers, meId);
 
   // Traits : couple (horizontal) et lien parents → enfants.
   const lines = s("g", { stroke: "#cfd9d3", "stroke-width": "2", fill: "none" });
@@ -243,13 +277,12 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
   for (const m of members) {
     const p = pos.get(m.id); if (!p) continue;
     const isMe = m.id === meId, isCenter = m.id === centerId && centerId !== meId, dead = m.deceased || m.death_date;
-    const fill = isMe ? "#1f6a4b" : dead ? "#eceff2" : sib.has(m.id) ? "#c4e5d3" : "#e3f2ea";
-    const ink = isMe ? "#fff" : dead ? "#55606a" : "#1f6a4b";
+    const [fill, ink] = colorOf(m.id);
     const sub = m.relation && m.relation !== "Moi" ? m.relation : years(m);
     const g = s("g", { class: "node", "data-id": m.id, tabindex: "0", role: "button", "aria-label": `${m.first_name}${m.relation ? ", " + m.relation : ""}, ouvrir la fiche`,
       onclick: () => onPick(m.id), onkeydown: (e) => { if (e.key === "Enter") onPick(m.id); } },
       isCenter ? s("circle", { cx: p.x, cy: p.y, r: R + 5, fill: "none", stroke: "#1f6a4b", "stroke-width": "2", "stroke-dasharray": "4 3" }) : null,
-      s("circle", { cx: p.x, cy: p.y, r: R, fill, stroke: isMe ? "#18402f" : "#fff", "stroke-width": "2" }),
+      s("circle", { cx: p.x, cy: p.y, r: R, fill, stroke: isMe ? ink : dead ? "#9aa5ae" : "#fff", "stroke-width": isMe ? "4" : "2", "stroke-dasharray": dead && !isMe ? "3 3" : null }),
       s("text", { x: p.x, y: p.y + 5, "text-anchor": "middle", "font-size": "15", "font-weight": "700", fill: ink }, initials(m)),
       s("text", { x: p.x, y: p.y + R + 20, "text-anchor": "middle", "font-size": m.first_name.length > 10 ? "13" : "15", "font-weight": "600", fill: "#14201a" }, trunc(m.first_name, 14)),
       sub ? s("text", { x: p.x, y: p.y + R + 37, "text-anchor": "middle", "font-size": "12.5", fill: m.relation && m.relation !== "Moi" ? "#1f6a4b" : "#5b6b63" }, trunc(sub, 14)) : null);
