@@ -1,7 +1,7 @@
 // Miff : démarrage et navigation.
-import { api, ApiError } from "./api.js?v=1795724226";
-import { errBox, h, icon, initials } from "./ui.js?v=1795724226";
-import * as V from "./views.js?v=1795724226";
+import { api, ApiError } from "./api.js?v=1795725424";
+import { errBox, h, icon, initials } from "./ui.js?v=1795725424";
+import * as V from "./views.js?v=1795725424";
 
 const app = document.getElementById("app");
 
@@ -61,7 +61,7 @@ async function route() {
   const header = h("header", { class: "top" }, backBtn || h("h1", {}, title),
     h("div", { class: "topr" },
       h("a", { class: "bell", href: "#/notifications", "aria-label": "Notifications" }, icon("bell"), h("i", { class: "dot", "data-badge": "notifs", hidden: true })),
-      h("a", { class: "me", href: "#/reglages", "aria-label": "Mes réglages" }, me.member.first_name, h("span", { class: "av self" }, initials(me.member)))));
+      h("a", { class: "me", href: "#/reglages", "aria-label": "Mes réglages" }, me.member.first_name, me.member.photo ? h("span", { class: "av self pic", style: `background-image:url("${me.member.photo}")` }) : h("span", { class: "av self" }, initials(me.member)))));
   app.replaceChildren(header, ...(window.MIFF_DEMO ? [h("div", { class: "demobar" }, "Démo : oncles, cousins et documents inventés. Données gardées sur cet appareil.")] : []), main, tabs(tab));
   try {
     const content = await fn(m);

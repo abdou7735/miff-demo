@@ -1,9 +1,9 @@
 // Les écrans de l'appli.
-import { api } from "./api.js?v=1795724226";
-import { openScanner } from "./scanner.js?v=1795724226";
-import { drawTree, familyView } from "./tree.js?v=1795724226";
-import { api as _a, DEMO } from "./api.js?v=1795724226";
-import { apiImg, apiLink, ask, errBox, folderIcon, frDate, fullName, h, icon, initials, sheet, toast, VIS_LABEL, years } from "./ui.js?v=1795724226";
+import { api } from "./api.js?v=1795725424";
+import { openScanner } from "./scanner.js?v=1795725424";
+import { drawTree, familyView } from "./tree.js?v=1795725424";
+import { api as _a, DEMO } from "./api.js?v=1795725424";
+import { apiImg, apiLink, ask, errBox, folderIcon, frDate, fullName, h, icon, initials, sheet, squareJpeg, toast, VIS_LABEL, years } from "./ui.js?v=1795725424";
 
 export const state = { me: null, members: [], groups: null, treeScale: null, docTab: "dossiers", generation: null, pending: null };
 
@@ -15,7 +15,111 @@ const M = (id) => state.members.find((m) => m.id === id);
 
 function av(m, cls = "") {
   const dead = m && (m.deceased || m.death_date);
-  return h("span", { class: `av ${m && state.me && m.id === state.me.member.id ? "self" : dead ? "dead" : ""} ${cls}` }, initials(m));
+  const photo = m && (m.photo || M(m.id)?.photo);
+  return h("span", { class: `av ${m && state.me && m.id === state.me.member.id ? "self" : dead ? "dead" : ""} ${photo ? "pic" : ""} ${cls}`,
+    style: photo ? `background-image:url("${photo}")` : null }, photo ? "" : initials(m));
+}
+
+// ================================================================ WhatsApp
+
+async function whatsappCard() {
+  const wa = await api.get("/api/whatsapp").catch(() => null);
+  if (!wa) return null;
+  const num = h("input", { class: "field", type: "tel", placeholder: "+974 5000 0000", value: wa.my_number ? "+" + wa.my_number : "" });
+  const saveNum = h("button", { class: "btn sec", onclick: async () => {
+    try { const r = await api.put("/api/whatsapp/me", { number: num.value }); num.value = r.my_number ? "+" + r.my_number : ""; toast(r.my_number ? "Numéro relié" : "Numéro retiré"); } catch (e) { toast(e.message); }
+  } }, "Enregistrer mon numéro");
+  const head = [h("h3", {}, "📲 Envoyer un document par WhatsApp"),
+    h("p", { class: "small muted", style: "margin:0" }, "Envoyez une photo ou un PDF au numéro de Miff sur WhatsApp : il est lu, rangé dans le bon dossier, et vous recevez une réponse. Écrivez un titre en légende si vous voulez.")];
+  if (wa.demo) {
+    const file = h("input", { type: "file", accept: "image/*,application/pdf", hidden: true });
+    const caption = h("input", { class: "field", placeholder: "Légende (facultatif), ex. Bulletin de Maya 2025" });
+    const convo = h("div", { class: "wachat" });
+    file.onchange = async () => {
+      const f = file.files[0]; if (!f) return;
+      convo.append(h("div", { class: "wame" }, "📎 ", f.name, caption.value ? h("div", {}, caption.value) : null));
+      const wait = h("div", { class: "wabot" }, "… lecture du document");
+      convo.append(wait);
+      try {
+        const fd = new FormData(); fd.append("file", f, f.name); fd.append("caption", caption.value);
+        const r = await api.form("/api/whatsapp/simulate", fd);
+        wait.replaceChildren(r.reply, h("div", {}, h("a", { href: `#/document/${r.id}` }, "Voir le document")));
+      } catch (e) { wait.textContent = "❌ " + e.message; }
+      file.value = ""; caption.value = "";
+    };
+    return h("div", { class: "card" }, head,
+      h("p", { class: "small", style: "margin:10px 0 0" }, "Dans la démo, essayez comme si vous l'envoyiez sur WhatsApp :"),
+      caption, h("button", { class: "btn", onclick: () => file.click() }, "Envoyer une photo au bot"), file, convo);
+  }
+  if (!wa.enabled) return h("div", { class: "card" }, head, h("p", { class: "small", style: "margin:10px 0 0" }, state.me.is_admin
+    ? "Le bot n'est pas encore activé sur ce NAS. Suivez le guide « Bot WhatsApp » pour le relier à votre numéro WhatsApp Business."
+    : "Le bot n'est pas encore activé. Demandez à l'administrateur de la famille."));
+  return h("div", { class: "card" }, head,
+    wa.bot_number ? h("p", {}, "Numéro de Miff : ", h("a", { href: `https://wa.me/${wa.bot_number.replace(/\D/g, "")}`, target: "_blank", rel: "noopener" }, h("b", {}, wa.bot_number))) : null,
+    h("label", { class: "lbl" }, "Mon numéro WhatsApp (avec l'indicatif)"), num, saveNum);
+}
+
+// ================================================================ Anniversaires
+
+function localISO(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+
+// Les anniversaires des prochains jours (personnes en vie dont on connaît la date de naissance).
+export function upcomingBirthdays(days = 30) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const out = [];
+  for (const m of state.members || []) {
+    if (!m.birth_date || m.deceased || m.death_date) continue;
+    const [y, mo, d] = m.birth_date.split("-").map(Number);
+    if (!y || !mo || !d) continue;
+    let next = new Date(today.getFullYear(), mo - 1, d);
+    if (next < today) next = new Date(today.getFullYear() + 1, mo - 1, d);
+    const inDays = Math.round((next - today) / 86400000);
+    if (inDays <= days) out.push({ m, inDays, age: next.getFullYear() - y });
+  }
+  return out.sort((a, b) => a.inDays - b.inDays || a.m.first_name.localeCompare(b.m.first_name));
+}
+const whenTxt = (n) => (n === 0 ? "Aujourd'hui" : n === 1 ? "Demain" : `Dans ${n} jours`);
+
+function wishButton(m, label = "Lui souhaiter") {
+  if (m.id === state.me.member.id || !m.has_account) return null;
+  const key = dmKey(state.me.member.id, m.id);
+  return h("a", { class: "btn sec small", href: `#/chat/${key}`, onclick: () => { state.draft = { key, text: `Joyeux anniversaire ${m.first_name} ! 🎂` }; } }, label);
+}
+
+function birthdayBanner() {
+  const list = upcomingBirthdays(1);
+  if (!list.length) return null;
+  return h("div", { class: "bday" }, list.map(({ m, inDays, age }) => h("div", { class: "bdayrow" },
+    h("span", { class: "bdayic" }, "🎂"),
+    h("a", { href: `#/personne/${m.id}` }, av(m)),
+    h("span", { class: "bdaytxt" }, m.id === state.me.member.id ? (inDays ? "Demain, c'est ton anniversaire !" : "Joyeux anniversaire ! Toute la famille pense à toi.")
+      : [h("b", {}, whenTxt(inDays)), `, ${m.first_name} fête ses ${age} ans`]),
+    inDays === 0 ? wishButton(m) : null)));
+}
+
+export function birthdaysToday() {
+  if (localStorage.getItem("miff-bday-seen") === localISO(new Date())) return 0;
+  return upcomingBirthdays(0).filter((b) => b.m.id !== state.me?.member.id).length;
+}
+
+function photoSheet(p) {
+  const input = h("input", { type: "file", accept: "image/*", hidden: true, onchange: async () => {
+    const f = input.files[0]; if (!f) return;
+    try {
+      const fd = new FormData(); fd.append("photo", await squareJpeg(f), "photo.jpg");
+      const r = await api.form(`/api/members/${p.id}/photo`, fd); close(); toast("Photo enregistrée");
+      if (p.id === state.me.member.id) state.me.member.photo = r.photo;
+      await loadMembers(); window.dispatchEvent(new HashChangeEvent("hashchange"));
+    } catch (e) { toast(e.message); }
+  } });
+  const close = sheet(h("h2", {}, p.id === state.me.member.id ? "Ma photo" : `Photo de ${p.first_name}`),
+    h("p", { class: "muted" }, "Elle remplace les initiales dans l'arbre, sur la fiche et dans le chat."),
+    input,
+    h("button", { class: "btn", onclick: () => input.click() }, p.photo ? "Changer la photo" : "Choisir une photo"),
+    p.photo ? h("button", { class: "btn ghost", onclick: async () => {
+      try { await api.del(`/api/members/${p.id}/photo`); close(); toast("Photo retirée"); if (p.id === state.me.member.id) state.me.member.photo = ""; await loadMembers(); window.dispatchEvent(new HashChangeEvent("hashchange")); } catch (e) { toast(e.message); }
+    } }, "Retirer la photo") : null,
+    h("button", { class: "btn ghost", onclick: () => close() }, "Annuler"));
 }
 function personChip(id) {
   const m = M(id); if (!m) return null;
@@ -117,7 +221,7 @@ export async function viewTree() {
   const info = h("div", { class: "hint" });
   // La vue : décalage (x, y) et zoom (k). L'arbre est dessiné une fois, on le déplace en entier.
   const v = { x: 0, y: 0, k: 1 };
-  let svg = null, W = 0, H = 0;
+  let svg = null, W = 0, H = 0, anim = null;
   const MAX = 2.5, M_ = 8;
   const dims = () => [box.clientWidth || Math.min(window.innerWidth, 560), box.clientHeight || 480];
   // Zoom minimal : tout l'arbre tient dans le cadre.
@@ -144,10 +248,11 @@ export async function viewTree() {
     apply();
   };
   function render(recenter) {
-    const openFamily = (id) => { st.focus = id; st.center = id; render(true); };
+    const openFamily = (id) => { st.focus = id; st.center = id; anim = "zin"; render(true); };
     svg = drawTree(state.members, meId, pick, { scale: 1, focus: st.focus, onFamily: openFamily });
     W = Number(svg.getAttribute("width")); H = Number(svg.getAttribute("height"));
     world.replaceChildren(svg);
+    if (anim) { svg.classList.add(anim); anim = null; }
     // Le cadre prend la hauteur de l'arbre en entier (sans grand vide), dans la limite de l'écran.
     requestAnimationFrame(() => {
       if (box.classList.contains("full")) return;
@@ -158,7 +263,7 @@ export async function viewTree() {
     const f = st.focus && M(st.focus);
     const sp = f && (f.spouses || []).map(M).filter(Boolean)[0];
     banner.replaceChildren(...(f ? [h("div", { class: "centerbar" },
-      h("button", { onclick: () => { const back = st.focus; st.focus = null; st.center = back; render(true); } }, "← Toute la famille"),
+      h("button", { onclick: () => { const back = st.focus; st.focus = null; st.center = back; anim = "zout"; render(true); } }, "← Toute la famille"),
       h("span", {}, "Famille de ", h("b", {}, f.first_name), sp ? [" & ", h("b", {}, sp.first_name)] : null))] : []));
     const shown = svg.querySelectorAll(".node").length;
     info.textContent = `Glissez pour vous déplacer, pincez (ou molette) pour zoomer. Touchez une personne pour ouvrir sa fiche. Touchez le petit rond à côté de quelqu'un de marié pour voir sa famille.`;
@@ -260,6 +365,7 @@ export async function viewTree() {
   render(true);
   const me = M(meId);
   return [
+    birthdayBanner(),
     banner,
     box,
     h("div", { class: "legend" }, h("span", {}, h("i", { class: "me" }), "Moi"), h("span", {}, h("i", { style: "background:#d6f0e0" }), h("i", { style: "background:#d6e7fa;margin-left:-4px" }), h("i", { style: "background:#fadbe5;margin-left:-4px" }), "Une couleur par famille"), h("span", {}, h("i", { class: "dead" }), "Décédé")),
@@ -306,7 +412,7 @@ export async function viewPerson(id) {
     try { await api.del(`/api/members/${p.id}`); toast("Personne retirée"); location.hash = "#/arbre"; } catch (e) { toast(e.message); }
   } }, "Retirer de l'arbre"));
   return [
-    h("div", { class: "prof" }, av(p, "big"), h("div", {}, h("h2", {}, fullName(p)),
+    h("div", { class: "prof" }, p.can_edit ? h("button", { class: "avbtn", "aria-label": "Changer la photo", onclick: () => photoSheet(p) }, av(p, "big"), h("span", { class: "avedit" }, "📷")) : av(p, "big"), h("div", {}, h("h2", {}, fullName(p)),
       h("div", { class: "muted" }, [p.relation, years(p), p.has_account ? "a un compte" : "pas encore de compte"].filter(Boolean).join(" · ")))),
     infos.length ? h("div", { class: "card" }, h("dl", { class: "rel", style: "margin:0" }, infos)) : null,
     p.notes ? h("div", { class: "hint" }, p.notes, lock("notes")) : null,
@@ -438,6 +544,18 @@ function targetsLabel(targets) {
   return names.slice(0, 3).join(", ") + (names.length > 3 ? "…" : "");
 }
 
+// Document qui expire bientôt (ou déjà expiré).
+function expiryInfo(d) {
+  if (!d.expires_on) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((new Date(d.expires_on + "T00:00:00") - today) / 86400000);
+  if (days > 120) return null;
+  if (days < 0) return { cls: "exp-red", txt: `Expiré depuis le ${frDate(d.expires_on)}`, short: "⛔ Expiré" };
+  const when = days === 0 ? "aujourd'hui" : days < 31 ? `dans ${days} jour${days > 1 ? "s" : ""}` : `dans ${Math.round(days / 30)} mois`;
+  return { cls: days < 31 ? "exp-red" : "exp-warn", txt: `Expire ${when} (le ${frDate(d.expires_on)})`, short: `⚠️ Expire ${when}` };
+}
+function expiryBadge(d) { const e = expiryInfo(d); return e ? h("span", { class: `badge ${e.cls}` }, e.short) : null; }
+
 function docRow(d) {
   if (d.locked) {
     const st = d.request?.status === "pending" ? "Demande envoyée" : d.request?.status === "refused" ? "Demande refusée" : "Demander l'accès";
@@ -449,7 +567,7 @@ function docRow(d) {
   const meta = [d.person_name, d.year, !d.mine && d.owner_name ? `ajouté par ${d.owner_name}` : ""].filter(Boolean).join(" · ");
   return h("a", { class: "doc", href: `#/document/${d.id}` },
     h("span", { class: "ic" }, "PDF"),
-    h("span", {}, h("b", {}, d.title), h("span", { class: "m" }, [d.folder_name, meta].filter(Boolean).join(" · ")), h("br"), visBadge(d)));
+    h("span", {}, h("b", {}, d.title), h("span", { class: "m" }, [d.folder_name, meta].filter(Boolean).join(" · ")), h("br"), visBadge(d), " ", expiryBadge(d)));
 }
 
 export async function viewDocuments() {
@@ -523,6 +641,7 @@ export async function viewDocument(id) {
     h("h2", { style: "margin-top:4px" }, d.title),
     h("div", { class: "muted small" }, [d.doc_type_label, d.person_name, `${d.pages} page${d.pages > 1 ? "s" : ""}`, `ajouté le ${frDate(d.created_at)}`, !d.mine ? `par ${d.owner_name}` : ""].filter(Boolean).join(" · ")),
     visBadge(d),
+    (() => { const e = expiryInfo(d); return e ? h("div", { class: `expbox ${e.cls}` }, e.cls === "exp-red" ? "⛔ " : "⚠️ ", e.txt, ". Pensez à le renouveler.") : null; })(),
     d.seen_by ? h("div", { class: "seen" }, `Visible par : ${d.seen_by.join(", ") || "personne d'autre"}`) : null,
     h("div", { class: "pageimgs" }, Array.from({ length: Math.min(d.pages, 20) }, (_, i) =>
       apiImg(`/api/documents/${id}/page/${i + 1}`, { alt: `Page ${i + 1}`, loading: "lazy" }))),
@@ -612,6 +731,9 @@ async function docForm({ header, preview, values, warn, submitLabel, onSubmit })
   const person = h("select", { class: `field ${warn.person_id ? "warn" : ""}`, id: "d-person" }, h("option", { value: "" }, "Personne en particulier"),
     state.members.slice().sort((a, b) => a.first_name.localeCompare(b.first_name)).map((m) => h("option", { value: m.id, selected: m.id === values.person_id }, fullName(m) + (m.id === state.me.member.id ? " (moi)" : ""))));
   const year = h("input", { class: "field", id: "d-year", inputmode: "numeric", value: values.year || "", placeholder: "ex. 2013" });
+  // Date d'expiration (carte d'identité, passeport…) : Miff prévient avant qu'elle arrive.
+  const hasExp = values.fields && values.fields.expiration;
+  const expIn = hasExp ? null : h("input", { class: "field", id: "d-exp", type: "date" });
   const fieldInputs = {};
   const fieldsBox = Object.entries(values.fields || {}).map(([k, f]) => {
     const low = f.confidence != null && f.confidence < 0.6;
@@ -657,6 +779,7 @@ async function docForm({ header, preview, values, warn, submitLabel, onSubmit })
     if (vis === "custom" && !targets.size) { err.replaceChildren(errBox("Choisissez qui peut voir le document.")); return; }
     const fields = {};
     for (const [k, f] of Object.entries(fieldInputs)) fields[k] = { label: f.label, value: f.el.value };
+    if (expIn && expIn.value) { const [y, mo, d] = expIn.value.split("-"); fields.expiration = { label: "Date d'expiration", value: `${d}/${mo}/${y}` }; }
     btn.disabled = true;
     try {
       await onSubmit({ title: title.value, folder_id: Number(folder.value), person_id: Number(person.value) || null, year: year.value, fields, visibility: vis, targets: [...targets], hidden: vis !== "family" && hidden });
@@ -669,6 +792,7 @@ async function docForm({ header, preview, values, warn, submitLabel, onSubmit })
     h("label", { class: "lbl", for: "d-folder" }, "Dossier", tag(warn.folder_id)), folder,
     h("label", { class: "lbl", for: "d-person" }, "Ce document concerne", tag(warn.person_id)), person,
     h("label", { class: "lbl", for: "d-year" }, "Année"), year,
+    expIn ? [h("label", { class: "lbl", for: "d-exp" }, "Date d'expiration (si le document en a une)"), expIn] : null,
     h("div", { class: "lbl", style: "margin-top:22px" }, "Qui peut voir ce document ?"), optsBox, customBox, hideBox,
     err, btn);
 }
@@ -702,6 +826,7 @@ export async function viewSettings() {
     ...demoBlock,
     h("div", { class: "prof" }, av(me.member, "big"), h("div", {}, h("h2", {}, fullName(me.member)), h("div", { class: "muted" }, `Identifiant : ${me.username}${me.is_admin ? " · administrateur" : ""}`))),
     h("a", { class: "btn sec", href: `#/personne/${me.member.id}` }, "Voir ma fiche"),
+    await whatsappCard(),
     installCard(),
     h("h2", {}, "Visibilité par défaut, dossier par dossier"),
     h("p", { class: "small muted", style: "margin:0" }, "C'est le choix proposé quand vous ajoutez un document. Vous pouvez toujours le changer au moment de l'envoi."),
@@ -853,8 +978,20 @@ export async function viewNotifications() {
   const data = await api.get("/api/notifications");
   api.post("/api/notifications/read").then(() => refreshBadges()).catch(() => {});
   const stLabel = { pending: "en attente", accepted: "acceptée", refused: "refusée" };
+  localStorage.setItem("miff-bday-seen", localISO(new Date()));
+  const bdays = upcomingBirthdays(30);
+  const exp = await api.get("/api/expiring").catch(() => []);
   return [
+    exp.length ? [h("h2", { style: "margin-top:4px" }, "📄 Documents à renouveler"), h("div", { class: "card" }, exp.map((d) => {
+      const e = expiryInfo(d) || { txt: "" };
+      return h("a", { class: "notif new", href: `#/document/${d.id}` }, h("span", { class: "nic" }, e.cls === "exp-red" ? "⛔" : "⚠️"),
+        h("span", {}, h("b", {}, d.title), h("small", {}, e.txt)));
+    }))] : null,
     data.requests.length ? [h("h2", { style: "margin-top:4px" }, "À vous de répondre"), ...data.requests.map((r) => requestCard(r))] : null,
+    bdays.length ? [h("h2", { style: "margin-top:4px" }, "🎂 Anniversaires à venir"), h("div", { class: "card" }, bdays.map(({ m, inDays, age }) =>
+      h("div", { class: `notif ${inDays === 0 ? "new" : ""}` }, h("a", { href: `#/personne/${m.id}` }, av(m)),
+        h("span", {}, h("a", { href: `#/personne/${m.id}`, class: "plain" }, h("b", {}, fullName(m))), h("small", {}, `${whenTxt(inDays)} · ${age} ans · ${frDate(m.birth_date).replace(/ \d{4}$/, "")}`)),
+        inDays === 0 ? wishButton(m, "Souhaiter") : null)))] : null,
     h("h2", {}, "Notifications"),
     data.notifications.length ? h("div", { class: "card" }, data.notifications.map((n) => h("a", { class: `notif ${n.read ? "" : "new"}`, href: n.link || "#/arbre" },
       h("span", { class: "nic" }, { birth: "👶", request: "🔑", answer: "✉️" }[n.kind] || "•"), h("span", {}, n.text, h("small", {}, frDate(n.at))))))
@@ -868,6 +1005,8 @@ export async function viewNotifications() {
 export async function refreshBadges() {
   try {
     const b = await api.get("/api/badges");
+    if (!state.members.length && state.me) await loadMembers().catch(() => {});
+    b.notifs = (b.notifs || 0) + birthdaysToday();
     document.querySelectorAll("[data-badge]").forEach((el) => { const n = b[el.dataset.badge] || 0; el.textContent = n > 9 ? "9+" : n; el.hidden = !n; });
   } catch {}
 }
@@ -1023,6 +1162,7 @@ export async function viewChat(key) {
   }, 4000);
 
   const text = h("textarea", { class: "field", rows: 1, placeholder: "Message", "aria-label": "Votre message", onkeydown: (e) => { if (e.key === "Enter" && !e.shiftKey && window.innerWidth > 700) { e.preventDefault(); send(); } } });
+  if (state.draft && state.draft.key === key) { text.value = state.draft.text; state.draft = null; setTimeout(() => text.focus(), 300); }
   const img = h("input", { type: "file", accept: "image/*", hidden: true, onchange: () => { if (img.files[0]) send(img.files[0]); } });
   async function send(file, docId) {
     if (!file && !docId && !text.value.trim()) return;

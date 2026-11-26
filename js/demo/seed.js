@@ -1,9 +1,14 @@
 // Démonstration : parents, frères et sœurs de la famille ; le reste (oncles, cousins, documents) est inventé.
+// Quelques anniversaires proches d'aujourd'hui, pour montrer les rappels.
+const soon = (days, year) => { const d = new Date(); d.setDate(d.getDate() + days); return `${year}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+
+const soonFr = (days) => soon(days, 0).replace(/^0-(\d\d)-(\d\d)$/, (_, mo, d) => `${d}/${mo}/${new Date(Date.now() + days * 86400000).getFullYear()}`);
+
 export const SEED = {
   members: [
     { id: 1, first_name: "Ahmed", last_name: "Said", sex: "M", birth_date: "1938-03-02", birth_place: "Mamoudzou", death_date: "2019-06-11", deceased: true, notes: "Exemple inventé pour la démonstration." },
     { id: 2, first_name: "Fatima", last_name: "Said", sex: "F", birth_date: "1942-09-20", birth_place: "Sada", notes: "Exemple inventé pour la démonstration." },
-    { id: 3, first_name: "Ibrahim", last_name: "Said", sex: "M", father_id: 1, mother_id: 2, city: "Moroni", job: "Commerçant", phone: "+269 300 00 00", private_fields: ["phone", "email"] },
+    { id: 3, first_name: "Ibrahim", last_name: "Said", sex: "M", birth_date: soon(4, 1963), father_id: 1, mother_id: 2, city: "Moroni", job: "Commerçant", phone: "+269 300 00 00", private_fields: ["phone", "email"] },
     { id: 4, first_name: "Nayma", last_name: "Said", sex: "F", father_id: 19, mother_id: 20 },
     { id: 5, first_name: "Samira", last_name: "Durand", birth_name: "Said", sex: "F", birth_date: "1970-07-08", father_id: 1, mother_id: 2 },
     { id: 6, first_name: "Marc", last_name: "Durand", sex: "M", birth_date: "1969-11-30" },
@@ -11,8 +16,8 @@ export const SEED = {
     { id: 8, first_name: "Ambdouloih", last_name: "Said", sex: "M", father_id: 3, mother_id: 4 },
     { id: 9, first_name: "Ambdoulhafour", last_name: "Said", sex: "M", father_id: 3, mother_id: 4, city: "Doha", phone: "+974 5000 0000", email: "exemple@miff.demo", private_fields: ["phone", "email"] },
     { id: 10, first_name: "Youssrine", last_name: "Said", sex: "F", father_id: 3, mother_id: 4 },
-    { id: 11, first_name: "Youssra", last_name: "Said", sex: "F", father_id: 3, mother_id: 4, city: "Marseille", job: "Infirmière", phone: "06 00 00 00 00", email: "youssra@miff.demo", notes: "Toujours partante pour les repas de famille.", private_fields: ["email"] },
-    { id: 12, first_name: "Youmna", last_name: "Said", sex: "F", father_id: 3, mother_id: 4 },
+    { id: 11, first_name: "Youssra", last_name: "Said", sex: "F", birth_date: soon(0, 1998), father_id: 3, mother_id: 4, city: "Marseille", job: "Infirmière", phone: "06 00 00 00 00", email: "youssra@miff.demo", notes: "Toujours partante pour les repas de famille.", private_fields: ["email"] },
+    { id: 12, first_name: "Youmna", last_name: "Said", sex: "F", birth_date: soon(12, 2004), father_id: 3, mother_id: 4 },
     { id: 13, first_name: "Alhadad", last_name: "Said", sex: "M", father_id: 3, mother_id: 4 },
     { id: 14, first_name: "Assad", last_name: "Said", sex: "M", father_id: 3, mother_id: 4 },
     { id: 15, first_name: "Mogni", last_name: "Said", sex: "M", father_id: 3, mother_id: 4 },
@@ -31,12 +36,14 @@ export const SEED = {
     { id: 28, first_name: "Noé", last_name: "Haddad", sex: "M", birth_date: "2003-07-17", father_id: 21, mother_id: 27 },
     { id: 29, first_name: "Léa", last_name: "Haddad", sex: "F", birth_date: "2007-02-03", father_id: 21, mother_id: 27 },
     { id: 30, first_name: "Thomas", last_name: "Leroy", sex: "M", birth_date: "1995-03-18" },
-    { id: 32, first_name: "Nadia", last_name: "Said", birth_name: "Mze", sex: "F", birth_date: "1994-05-02", notes: "Exemple inventé pour la démonstration." },
+    { id: 32, first_name: "Nadia", last_name: "Said", birth_name: "Mze", sex: "F", birth_date: "1994-05-02", father_id: 35, mother_id: 36, notes: "Exemple inventé pour la démonstration." },
+    { id: 35, first_name: "Hamada", last_name: "Mze", sex: "M", birth_date: "1962-01-20", notes: "Exemple inventé pour la démonstration." },
+    { id: 36, first_name: "Zalia", last_name: "Mze", sex: "F", birth_date: "1966-08-09", notes: "Exemple inventé pour la démonstration." },
     { id: 33, first_name: "Ilyes", last_name: "Said", sex: "M", birth_date: "2019-10-08", father_id: 8, mother_id: 32 },
     { id: 34, first_name: "Sara", last_name: "Said", sex: "F", birth_date: "2022-03-15", father_id: 8, mother_id: 32 },
     { id: 31, first_name: "Aya", last_name: "Leroy", sex: "F", birth_date: "2026-09-14", birth_place: "Mamoudzou", father_id: 30, mother_id: 22 },
   ],
-  unions: [[1, 2], [3, 4], [5, 6], [7, 24], [19, 20], [21, 27], [22, 30], [8, 32]],
+  unions: [[1, 2], [3, 4], [5, 6], [7, 24], [19, 20], [21, 27], [22, 30], [8, 32], [35, 36]],
   users: [
     { member_id: 9, username: "ambdoulhafour", password: "demo1234", is_admin: true },
     { member_id: 11, username: "youssra", password: "demo1234", is_admin: false },
@@ -61,7 +68,7 @@ export const SEED = {
     { owner: 1, person: 9, folder: "lycee", page: "bulletinYanis", type: "bulletin", title: "Bulletin Terminale S – 2e trimestre 2012-2013 – Ambdoulhafour", year: "2012", visibility: "custom", targets: ["rel:parents"], created: "2026-11-05 18:40:00",
       fields: { etablissement: { label: "Établissement", value: "Lycée Younoussa-Bamana, Mamoudzou" }, classe: { label: "Classe", value: "Terminale S" }, annee_scolaire: { label: "Année scolaire", value: "2012-2013" }, trimestre: { label: "Trimestre", value: "2e trimestre" }, moyenne: { label: "Moyenne générale", value: "13,42" } } },
     { owner: 1, person: 9, folder: "cni", page: "cniYanis", type: "cni", title: "Carte d'identité – Ambdoulhafour", year: "2021", visibility: "private", created: "2026-11-06 09:00:00",
-      fields: { expiration: { label: "Date d'expiration", value: "03/02/2031" } } },
+      fields: { expiration: { label: "Date d'expiration", value: soonFr(52) } } },
     { owner: 2, person: 11, folder: "actes-naissance", page: "acteLina", type: "acte_naissance", title: "Acte de naissance – Youssra", year: "1998", visibility: "custom", targets: ["rel:siblings", "rel:parents"], created: "2026-11-08 14:20:00",
       fields: { date_naissance: { label: "Date de naissance", value: "02/10/1998" }, lieu_naissance: { label: "Lieu de naissance", value: "Mamoudzou" } } },
     { owner: 2, person: 11, folder: "quittances", page: "quittanceLina", type: "quittance", title: "Quittance de loyer – octobre 2026", year: "2026", visibility: "private", created: "2026-11-09 08:00:00" },

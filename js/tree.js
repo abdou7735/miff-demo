@@ -1,7 +1,7 @@
 // Dessin de l'arbre familial en SVG.
 // Deux vues : « toute la famille » (centrée sur moi, les foyers de ma génération repliés)
 // et « le foyer d'une personne » (elle, son conjoint et leurs descendants).
-import { s, initials, years } from "./ui.js?v=1795724226";
+import { s, initials, years } from "./ui.js?v=1795725424";
 
 const NODE_W = 104, ROW_H = 140, R = 30, TOP = 64, GAP = 24, GRID_ROW = 132, PAD = 10;
 
@@ -90,25 +90,35 @@ export function familyColors(members, meId) {
 export function familyView(allMembers, meId, focus) {
   const A = relations(allMembers);
   const gen = (id) => A.by.get(id)?.generation || 0;
-  const inLaw = (id) => !A.parents(id).length && A.spouses(id).some((sp) => A.parents(sp).length);
-  let shown, cut;
+  const down = (ids) => { const out = new Set(ids), todo = [...ids]; while (todo.length) for (const k of A.children(todo.pop())) if (!out.has(k)) { out.add(k); todo.push(k); } return out; };
+  let blood, shown, cut;
   if (focus && A.by.has(focus)) {
-    shown = new Set([focus, ...A.spouses(focus)]);
-    const todo = [...shown];
-    while (todo.length) { const x = todo.pop(); for (const k of A.children(x)) if (!shown.has(k)) { shown.add(k); todo.push(k); } }
+    // Le foyer : le couple, ses descendants, et au-dessus les parents des deux (la belle-famille).
+    blood = down([focus]);
+    shown = new Set(blood);
+    for (const x of [...blood]) A.spouses(x).forEach((sp) => shown.add(sp));
+    for (const x of [focus, ...A.spouses(focus)]) A.parents(x).forEach((p) => shown.add(p));
     cut = gen(focus) + 1;
-  } else { shown = new Set(A.by.keys()); cut = gen(meId); }
+  } else {
+    // Toute la famille : mes ancêtres et tous leurs descendants, avec leurs conjoints.
+    const anc = new Set([meId]), todo = [meId];
+    while (todo.length) for (const p of A.parents(todo.pop())) if (!anc.has(p)) { anc.add(p); todo.push(p); }
+    blood = down([...anc]);
+    shown = new Set(blood);
+    for (const x of [...blood]) A.spouses(x).forEach((sp) => shown.add(sp));
+    cut = gen(meId);
+  }
   const removed = new Set(), folds = new Map();
   for (const id of [...shown].sort((a, b) => gen(a) - gen(b) || a - b)) {
-    if (removed.has(id) || gen(id) < cut || inLaw(id)) continue;
-    const sps = A.spouses(id).filter((sp) => shown.has(sp) && !A.parents(sp).length);
+    if (removed.has(id) || gen(id) < cut || !blood.has(id)) continue;
+    const sps = A.spouses(id).filter((sp) => shown.has(sp) && !blood.has(sp));
     const kids = A.children(id).filter((k) => shown.has(k));
     if (!sps.length && !kids.length) continue;
     sps.forEach((sp) => removed.add(sp));
     const todo = [...kids];
     while (todo.length) {
       const x = todo.pop(); if (removed.has(x)) continue; removed.add(x);
-      todo.push(...A.children(x)); A.spouses(x).forEach((sp) => { if (!A.parents(sp).length) removed.add(sp); });
+      todo.push(...A.children(x)); A.spouses(x).forEach((sp) => { if (!blood.has(sp)) removed.add(sp); });
     }
     folds.set(id, { spouse: sps[0] ?? A.spouses(id)[0] ?? null, kids: A.children(id).length });
   }
@@ -124,7 +134,10 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
   const members = allMembers.filter((m) => shown.has(m.id));
   const T = relations(members);
   const by = T.by;
-  const sortKids = (ids) => ids.slice().sort((a, b) => (by.get(a).birth_date || "9999").localeCompare(by.get(b).birth_date || "9999") || a - b);
+  // Frères et sœurs : par date de naissance si on les connaît toutes, sinon dans l'ordre où ils ont été ajoutés.
+  const sortKids = (ids) => ids.every((i) => by.get(i).birth_date)
+    ? ids.slice().sort((a, b) => by.get(a).birth_date.localeCompare(by.get(b).birth_date) || a - b)
+    : ids.slice().sort((a, b) => a - b);
   const placed = new Set();
 
   // Un bloc = un couple et, en dessous, les blocs de leurs enfants.
@@ -154,7 +167,14 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
 
   const roots = [];
   let extra = []; // grands-parents placés après coup, au-dessus de leurs enfants
-  if (level < 3 && by.has(centerId)) {
+  if (focus && by.has(focus)) {
+    // Le foyer : le couple côte à côte, leurs enfants dessous, et les parents de chacun au-dessus.
+    const partners = [focus, ...T.spouses(focus)];
+    for (const x of partners) T.parents(x).forEach((p) => placed.add(p));
+    roots.push(build(focus, 1, () => true));
+    for (const x of partners) { const ps = T.parents(x); if (ps.length) extra.push({ unit: orderCouple(ps, by), kidsOf: x }); }
+    for (const m of members) if (!placed.has(m.id)) roots.push(build(m.id, 1));
+  } else if (level < 3 && by.has(centerId)) {
     // Vue centrée : côté du père à gauche, côté de la mère à droite.
     const c = by.get(centerId);
     const father = c.father_id && by.has(c.father_id) ? c.father_id : null;
@@ -241,7 +261,8 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
 
   // Cadrage.
   const xs = [...pos.values()].map((p) => p.x), gs = [...pos.values()].map((p) => p.g);
-  const minX = Math.min(...xs) - NODE_W / 2 - 10, maxX = Math.max(...xs) + NODE_W / 2 + 10;
+  const GUT = 118; // colonne de gauche : le nom de chaque génération
+  const minX = Math.min(...xs) - NODE_W / 2 - 10 - GUT, maxX = Math.max(...xs) + NODE_W / 2 + 10;
   const minG = Math.min(...gs), maxG = Math.max(...gs);
   // Hauteur de chaque génération : plus grande quand une grille y prend plusieurs lignes.
   const gridExtra = new Map();
@@ -313,7 +334,8 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
     const g = s("g", { class: "node", "data-id": m.id, tabindex: "0", role: "button", "aria-label": `${m.first_name}${m.relation ? ", " + m.relation : ""}, ouvrir la fiche`,
       onclick: () => onPick(m.id), onkeydown: (e) => { if (e.key === "Enter") onPick(m.id); } },
       s("circle", { cx: p.x, cy: p.y, r: R, fill, stroke: isMe ? ink : dead ? "#9aa5ae" : "#fff", "stroke-width": isMe ? "4" : "2", "stroke-dasharray": dead && !isMe ? "3 3" : null }),
-      s("text", { x: p.x, y: p.y + 5, "text-anchor": "middle", "font-size": "15", "font-weight": "700", fill: ink }, initials(m)),
+      m.photo ? pic(m.photo, p.x, p.y, R - (isMe ? 2 : 1)) : s("text", { x: p.x, y: p.y + 5, "text-anchor": "middle", "font-size": "15", "font-weight": "700", fill: ink }, initials(m)),
+      isMe && m.photo ? s("circle", { cx: p.x, cy: p.y, r: R, fill: "none", stroke: ink, "stroke-width": "4" }) : null,
       s("text", { x: p.x, y: p.y + R + 20, "text-anchor": "middle", "font-size": m.first_name.length > 10 ? "13" : "15", "font-weight": "600", fill: "#14201a" }, trunc(m.first_name, 14)),
       sub ? s("text", { x: p.x, y: p.y + R + 37, "text-anchor": "middle", "font-size": "12.5", fill: m.relation && m.relation !== "Moi" ? "#1f6a4b" : "#5b6b63" }, trunc(sub, 14)) : null);
     nodes.append(g);
@@ -328,15 +350,38 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
         onclick: (e) => { e.stopPropagation(); onFamily(m.id); }, onkeydown: (e) => { if (e.key === "Enter") onFamily(m.id); } },
         s("circle", { cx: bx, cy: by2, r: br + 3, fill: "#fff" }),
         s("circle", { cx: bx, cy: by2, r: br, fill: sf, stroke: si, "stroke-width": "1.5" }),
-        s("text", { x: bx, y: by2 + 4, "text-anchor": "middle", "font-size": "10.5", "font-weight": "700", fill: si }, sp ? initials(sp) : "♥"),
+        sp?.photo ? pic(sp.photo, bx, by2, br - 1) : s("text", { x: bx, y: by2 + 4, "text-anchor": "middle", "font-size": "10.5", "font-weight": "700", fill: si }, sp ? initials(sp) : "♥"),
         f.kids ? s("g", {},
           s("circle", { cx: bx + 13, cy: by2 + 12, r: 9, fill: si, stroke: "#fff", "stroke-width": "1.5" }),
           s("text", { x: bx + 13, y: by2 + 15.5, "text-anchor": "middle", "font-size": "10", "font-weight": "700", fill: "#fff" }, String(f.kids))) : null));
     }
   }
-  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, width: W * scale, height: H * scale, role: "img", "aria-label": "Arbre familial" }, lines, nodes);
+  // Bandes des générations, nommées par rapport à moi.
+  const myG = allBy.get(meId)?.generation ?? 0;
+  const bands = s("g", {});
+  for (let g = minG; g <= maxG; g++) {
+    const top = rowY.get(g) - R - 30, hgt = ROW_H + (gridExtra.get(g) || 0) * GRID_ROW;
+    if ((g - minG) % 2 === 0) bands.append(s("rect", { x: 0, y: top, width: W, height: hgt, fill: "#f6f9f7" }));
+    const name = genName(g - myG);
+    const two = name.startsWith("Arrière-") ? ["Arrière-", name.slice(8)] : [name];
+    bands.append(s("text", { x: 14, y: rowY.get(g) + 5 - (two.length - 1) * 8, "font-size": "12.5", "font-weight": "700", fill: "#7b8a83" },
+      two.map((t, i) => s("tspan", { x: 14, dy: i ? 16 : 0 }, t))));
+  }
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, width: W * scale, height: H * scale, role: "img", "aria-label": "Arbre familial" }, bands, lines, nodes);
   svg._pos = (id) => { const p = pos.get(id); return p ? { x: p.x * scale, y: p.y * scale } : null; };
   return svg;
+}
+
+function genName(d) {
+  return { "-3": "Arrière-grands-parents", "-2": "Grands-parents", "-1": "Parents", 0: "Ma génération", 1: "Enfants", 2: "Petits-enfants", 3: "Arrière-petits-enfants" }[d] ?? (d < 0 ? "Ancêtres" : "Descendants");
+}
+
+// Une photo ronde dans l'arbre.
+let picN = 0;
+function pic(href, cx, cy, r) {
+  const id = `ph${++picN}`;
+  return s("g", {}, s("clipPath", { id }, s("circle", { cx, cy, r })),
+    s("image", { href, x: cx - r, y: cy - r, width: 2 * r, height: 2 * r, "clip-path": `url(#${id})`, preserveAspectRatio: "xMidYMid slice" }));
 }
 
 function orderCouple(ids, by) {

@@ -1,8 +1,8 @@
 // Version de démonstration : le « serveur » Miff tourne dans le navigateur.
 // Les données restent dans ce navigateur (localStorage + IndexedDB). Aucun envoi sur Internet.
-import { analyze, norm, TYPE_LABELS } from "./recognize.js?v=1795724226";
-import { detectQuad, loadBitmap, processImage } from "./image.js?v=1795724226";
-import { makeSeedPages, SEED } from "./seed.js?v=1795724226";
+import { analyze, norm, TYPE_LABELS } from "./recognize.js?v=1795725424";
+import { detectQuad, loadBitmap, processImage } from "./image.js?v=1795725424";
+import { makeSeedPages, SEED } from "./seed.js?v=1795725424";
 
 const KEY = "miff-demo-db-v6", SESSION = "miff-demo-user";
 
@@ -120,24 +120,23 @@ class Tree {
   nephews(i) { const s = new Set(); for (const x of this.siblings(i)) for (const c of this.children(x)) s.add(c); return s; }
   group(k, i) { const f = { parents: "parents", siblings: "siblings", spouse: "spouses", children: "children", grandparents: "grandparents", grandchildren: "grandchildren", uncles: "uncles", cousins: "cousins", nephews: "nephews" }[k]; return f ? this[f](i) : new Set(); }
   generations() {
+    // De proche en proche : enfant = une génération en dessous, conjoint = même génération.
+    const desc = (i, seen) => { if (seen.has(i)) return 0; seen.add(i); let n = 1; for (const k of this.children(i)) n += desc(k, seen); return n; };
+    const order = [...this.m.keys()].sort((a, b) => desc(b, new Set()) - desc(a, new Set()) || a - b);
     const gen = new Map();
-    for (let it = 0; it < this.m.size + 2; it++) {
-      let changed = false;
-      for (const i of this.m.keys()) {
-        const ps = [...this.parents(i)].filter((p) => gen.has(p)).map((p) => gen.get(p));
-        let g;
-        if (ps.length) g = Math.max(...ps) + 1;
-        else if (!this.parents(i).size) {
-          const c = [...this.spouses(i)].filter((s) => gen.has(s) && this.parents(s).size).map((s) => gen.get(s))
-            .concat([...this.children(i)].filter((k) => gen.has(k)).map((k) => gen.get(k) - 1));
-          g = c.length ? Math.max(...c) : 0;
-        } else continue;
-        if (gen.get(i) !== g) { gen.set(i, g); changed = true; }
+    const sorted = (set) => [...set].sort((a, b) => a - b);
+    for (const start of order) {
+      if (gen.has(start)) continue;
+      const comp = new Map([[start, 0]]), q = [start];
+      while (q.length) {
+        const x = q.shift();
+        for (const k of sorted(this.children(x))) if (!comp.has(k)) { comp.set(k, comp.get(x) + 1); q.push(k); }
+        for (const p of sorted(this.parents(x))) if (!comp.has(p)) { comp.set(p, comp.get(x) - 1); q.push(p); }
+        for (const sp of sorted(this.spouses(x))) if (!comp.has(sp)) { comp.set(sp, comp.get(x)); q.push(sp); }
       }
-      if (!changed) break;
+      const mn = Math.min(...comp.values());
+      for (const [k, v] of comp) gen.set(k, v - mn);
     }
-    const mn = Math.min(...gen.values());
-    for (const [k, v] of gen) gen.set(k, v - mn);
     return gen;
   }
   relation(me, o) {
@@ -147,6 +146,10 @@ class Tree {
       ["grandparents", "Grand-mère", "Grand-père"], ["grandchildren", "Petite-fille", "Petit-fils"], ["uncles", "Tante", "Oncle"], ["nephews", "Nièce", "Neveu"], ["cousins", "Cousine", "Cousin"]]) {
       if (this[fn](me).has(o)) return f ? fem : masc;
     }
+    // Belle-famille : conjoint d'un frère ou d'une sœur, frère ou sœur du conjoint, parents du conjoint.
+    for (const x of this.siblings(me)) if (this.spouses(x).has(o)) return f ? "Belle-sœur" : "Beau-frère";
+    for (const sp of this.spouses(me)) { if (this.siblings(sp).has(o)) return f ? "Belle-sœur" : "Beau-frère"; if (this.parents(sp).has(o)) return f ? "Belle-mère" : "Beau-père"; }
+    for (const k of this.children(me)) if (this.spouses(k).has(o)) return f ? "Belle-fille" : "Gendre";
     return "";
   }
 }
@@ -192,6 +195,11 @@ function memberPublic(m, tree, me, gens, accs, viewer) {
   }
   return d;
 }
+// Date d'expiration lue dans les champs (« 03/02/2031 » -> « 2031-02-03 »).
+function expiresOn(d) {
+  const m = (d.fields?.expiration?.value || "").match(/(\d{1,2})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{4})/);
+  return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : "";
+}
 function docPublic(d, user) {
   const f = db.folders.find((x) => x.id === d.folder_id) || {};
   const parent = db.folders.find((x) => x.id === f.parent_id);
@@ -199,7 +207,7 @@ function docPublic(d, user) {
   const owner = db.users.find((u) => u.id === d.owner_user_id);
   const om = db.members.find((x) => x.id === owner?.member_id);
   return { ...d, ocr_text: undefined, doc_type_label: TYPE_LABELS[d.doc_type] || "Document", folder_name: f.name || "", parent_folder_name: parent?.name || "",
-    person_name: p ? `${p.first_name} ${p.last_name}`.trim() : "", mine: d.owner_user_id === user.id, owner_name: om?.first_name || "" };
+    person_name: p ? `${p.first_name} ${p.last_name}`.trim() : "", mine: d.owner_user_id === user.id, owner_name: om?.first_name || "", expires_on: expiresOn(d) };
 }
 
 function lockedPublic(d, user) {
@@ -405,6 +413,37 @@ export async function handle(method, url, body) {
       if (other) db.unions.push({ id: nextId("unions"), a_id: other, b_id: id });
     }
     save(); return { id };
+  }
+  if (path === "/api/whatsapp") return { enabled: false, demo: true, bot_number: "", my_number: user.whatsapp || "" };
+  if (path === "/api/whatsapp/me" && method === "PUT") { user.whatsapp = String(body.number || "").replace(/\D/g, ""); save(); return { my_number: user.whatsapp }; }
+  if (path === "/api/whatsapp/simulate" && method === "POST") {
+    // Démo : on fait comme si la photo arrivait par WhatsApp, et on la range toute seule.
+    const f = body.get("file"); if (!f || !f.size) fail(400, "Choisissez une photo ou un PDF.");
+    const caption = (body.get("caption") || "").trim();
+    const fd = new FormData(); fd.append("files", f, f.name || "photo.jpg");
+    const up = await handle("POST", "/api/uploads", fd);
+    const sg = up.suggestion;
+    const r = await handle("POST", "/api/documents", { upload_id: up.upload_id, title: caption || sg.title, folder_id: sg.folder_id, person_id: sg.person_id, doc_type: sg.doc_type,
+      year: sg.year || "", fields: Object.fromEntries(Object.entries(sg.fields || {}).map(([k, x]) => [k, { label: x.label, value: x.value }])), visibility: sg.visibility.visibility, targets: sg.visibility.targets });
+    const fo = db.folders.find((x) => x.id === sg.folder_id), par = db.folders.find((x) => x.id === fo?.parent_id);
+    const who = db.members.find((x) => x.id === sg.person_id);
+    const visTxt = { private: "visible par vous seulement", family: "visible par toute la famille", custom: "visible par les personnes choisies" }[sg.visibility.visibility] || "";
+    return { id: r.id, reply: `✅ Rangé dans ${par ? par.name + " › " : ""}${fo?.name || ""} : « ${caption || sg.title} »${who ? ` (${who.first_name})` : ""}, ${visTxt}.` };
+  }
+  if (path === "/api/expiring") {
+    const lim = new Date(Date.now() + 120 * 86400000).toISOString().slice(0, 10);
+    return db.docs.filter((d) => (d.owner_user_id === user.id || d.person_id === user.member_id) && canView(user, d, tree))
+      .map((d) => docPublic(d, user)).filter((d) => d.expires_on && d.expires_on <= lim).sort((a, b) => a.expires_on.localeCompare(b.expires_on));
+  }
+  if (R(/^\/api\/members\/(\d+)\/photo$/)) {
+    const id = Number(m[1]); const x = db.members.find((y) => y.id === id); if (!x) fail(404, "Personne introuvable");
+    if (!(user.is_admin || id === user.member_id || !accs.has(id))) fail(403, "Seule cette personne ou l'administrateur peut changer sa photo.");
+    if (method === "DELETE") { x.photo = ""; save(); return { ok: true }; }
+    if (method === "POST") {
+      const f = body.get("photo"); if (!f || !f.size) fail(400, "Choisissez une photo.");
+      x.photo = await new Promise((ok) => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(f); });
+      save(); return { photo: x.photo };
+    }
   }
   if (R(/^\/api\/members\/(\d+)$/)) {
     const id = Number(m[1]); const x = db.members.find((y) => y.id === id); if (!x) fail(404, "Personne introuvable");

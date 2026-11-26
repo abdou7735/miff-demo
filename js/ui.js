@@ -1,5 +1,5 @@
 // Outils d'affichage communs.
-import { api, DEMO } from "./api.js?v=1795724226";
+import { api, DEMO } from "./api.js?v=1795725424";
 export function h(tag, attrs = {}, ...kids) {
   const el = document.createElementNS(tag === "svg" || attrs._svg ? "http://www.w3.org/2000/svg" : "http://www.w3.org/1999/xhtml", tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -117,4 +117,13 @@ export function ask(question, yes = "Oui", no = "Annuler") {
     const done = (v) => { close(); resolve(v); };
     close = sheet(h("h2", {}, question), h("button", { class: "btn", onclick: () => done(true) }, yes), h("button", { class: "btn ghost", onclick: () => done(false) }, no));
   });
+}
+
+// Photo de profil : carré centré, 320 pixels, en JPEG (léger pour l'arbre et le chat).
+export async function squareJpeg(file, size = 320) {
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" }).catch(() => createImageBitmap(file));
+  const c = Math.min(bmp.width, bmp.height);
+  const cv = document.createElement("canvas"); cv.width = cv.height = size;
+  cv.getContext("2d").drawImage(bmp, (bmp.width - c) / 2, (bmp.height - c) / 2, c, c, 0, 0, size, size);
+  return await new Promise((ok) => cv.toBlob(ok, "image/jpeg", 0.86));
 }
