@@ -1,7 +1,7 @@
 // Miff : démarrage et navigation.
-import { api, ApiError } from "./api.js?v=1795725424";
-import { errBox, h, icon, initials } from "./ui.js?v=1795725424";
-import * as V from "./views.js?v=1795725424";
+import { api, ApiError } from "./api.js?v=1795728291";
+import { errBox, h, icon, initials } from "./ui.js?v=1795728291";
+import * as V from "./views.js?v=1795728291";
 
 const app = document.getElementById("app");
 
@@ -19,6 +19,7 @@ const ROUTES = [
   [/^#\/ajouter$/, "Ajouter", "ajouter", () => V.viewAdd()],
   [/^#\/verifier$/, "Vérifier", "ajouter", () => V.viewVerify(), "#/ajouter"],
   [/^#\/reglages$/, "Réglages", "reglages", () => V.viewSettings()],
+  [/^#\/automatisations$/, "Automatisations", "reglages", () => V.viewAutos(), "#/reglages"],
   [/^#\/chat$/, "Discussions", "chat", () => V.viewChats()],
   [/^#\/chat\/([\w:-]+)$/, "Discussion", "chat", (m) => V.viewChat(m[1]), "#/chat"],
   [/^#\/notifications$/, "Notifications", "", () => V.viewNotifications(), "back"],

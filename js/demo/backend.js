@@ -1,10 +1,10 @@
 // Version de démonstration : le « serveur » Miff tourne dans le navigateur.
 // Les données restent dans ce navigateur (localStorage + IndexedDB). Aucun envoi sur Internet.
-import { analyze, norm, TYPE_LABELS } from "./recognize.js?v=1795725424";
-import { detectQuad, loadBitmap, processImage } from "./image.js?v=1795725424";
-import { makeSeedPages, SEED } from "./seed.js?v=1795725424";
+import { analyze, norm, TYPE_LABELS } from "./recognize.js?v=1795728291";
+import { detectQuad, loadBitmap, processImage } from "./image.js?v=1795728291";
+import { makeSeedPages, SEED } from "./seed.js?v=1795728291";
 
-const KEY = "miff-demo-db-v6", SESSION = "miff-demo-user";
+const KEY = "miff-demo-db-v7", SESSION = "miff-demo-user";
 
 const RELATION_GROUPS = {
   parents: "Mes parents", siblings: "Mes frères et sœurs", spouse: "Mon conjoint", children: "Mes enfants",
@@ -19,8 +19,31 @@ const FOLDERS = [
   ["logement", "Logement", [["baux", "Baux", "private"], ["quittances", "Quittances de loyer", "private"], ["factures", "Factures", "private"]]],
   ["sante", "Santé", [["vaccination", "Carnets de vaccination", "private"], ["ordonnances", "Ordonnances", "private"], ["certificats", "Certificats médicaux", "private"], ["secu-mutuelle", "Sécurité sociale et mutuelle", "private"]]],
   ["notaire", "Notaire et succession", [["succession", "Succession", "custom:rel:siblings"], ["propriete", "Actes de propriété", "family"], ["testaments", "Testaments", "private"]]],
+  ["argent", "Travail et argent", [["fiches-paie", "Fiches de paie", "private"], ["banque", "Relevés de banque", "private"], ["impots", "Impôts", "private"], ["caf", "CAF et aides", "private"]]],
   ["autres", "Autres", [["divers", "Divers", "private"]]],
 ];
+
+// ------------------------------------------------------------ Automatisations
+const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+function fillTitle(t, d = new Date()) { return String(t || "").replaceAll("{mois}", MOIS[d.getMonth()]).replaceAll("{Mois}", MOIS[d.getMonth()][0].toUpperCase() + MOIS[d.getMonth()].slice(1)).replaceAll("{annee}", d.getFullYear()).replaceAll("{année}", d.getFullYear()).trim(); }
+function autoCheck(b) {
+  if (!String(b.name || "").trim()) fail(400, "Donnez un nom à l'automatisation.");
+  if (!String(b.from_has || "").trim() && !String(b.words || "").trim()) fail(400, "Indiquez au moins l'expéditeur ou un mot à reconnaître.");
+}
+function autoClean(b) {
+  return { name: String(b.name).trim().slice(0, 80), from_has: String(b.from_has || "").trim(), words: String(b.words || "").trim(), folder_id: b.folder_id || null, person_id: b.person_id || null,
+    title: String(b.title || "").trim(), visibility: b.visibility || "private", expect_day: Math.max(0, Math.min(28, Number(b.expect_day) || 0)), active: b.active !== false };
+}
+function autoPublic(r) { const { user_id, ...o } = r; return { ...o, example_title: fillTitle(r.title) }; }
+async function fakeMailDoc(title, from) {
+  const c = document.createElement("canvas"); c.width = 900; c.height = 1270; const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.fillStyle = "#111";
+  g.font = "bold 30px sans-serif"; g.fillText((from || "Expéditeur").toUpperCase(), 70, 110);
+  g.font = "bold 46px sans-serif"; g.fillText(title.toUpperCase(), 70, 260);
+  g.font = "26px sans-serif";
+  ["Document reçu par mail et rangé automatiquement par Miff.", "Exemple de démonstration.", "", `Date : ${new Date().toLocaleDateString("fr-FR")}`].forEach((l, i) => g.fillText(l, 70, 360 + i * 46));
+  return await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85));
+}
 
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const fail = (s, m) => { throw new HttpError(s, m); };
@@ -413,6 +436,44 @@ export async function handle(method, url, body) {
       if (other) db.unions.push({ id: nextId("unions"), a_id: other, b_id: id });
     }
     save(); return { id };
+  }
+  // ---------------------------------------------------------- Automatisations (boîte mail simulée)
+  if (path === "/api/autos" && method === "GET") {
+    db.autos ||= []; db.mailboxes ||= {};
+    return { mailbox: db.mailboxes[user.id] || null, rules: db.autos.filter((r) => r.user_id === user.id).map(autoPublic) };
+  }
+  if (path === "/api/autos" && method === "POST") { db.autos ||= []; autoCheck(body); const r = { id: nextId("autos"), user_id: user.id, last_doc_at: "", ...autoClean(body) }; db.autos.push(r); save(); return autoPublic(r); }
+  if (R(/^\/api\/autos\/(\d+)$/)) {
+    db.autos ||= []; const r = db.autos.find((x) => x.id === Number(m[1]) && x.user_id === user.id); if (!r) fail(404, "Automatisation introuvable");
+    if (method === "DELETE") { db.autos = db.autos.filter((x) => x !== r); save(); return { ok: true }; }
+    autoCheck(body); Object.assign(r, autoClean(body)); save(); return autoPublic(r);
+  }
+  if (path === "/api/mailbox" && method === "PUT") {
+    const a = String(body.address || "").trim().toLowerCase();
+    if (!/^[\w.+-]+@[\w-]+(\.[\w-]+)+$/.test(a)) fail(400, "Adresse mail invalide");
+    if (!body.password) fail(400, "Écrivez le mot de passe d'application.");
+    db.mailboxes ||= {}; db.mailboxes[user.id] = { address: a, host: "démo", last_check: "", error: "" }; save(); return db.mailboxes[user.id];
+  }
+  if (path === "/api/mailbox" && method === "DELETE") { db.mailboxes ||= {}; delete db.mailboxes[user.id]; save(); return { ok: true }; }
+  if (path === "/api/mailbox/check" && method === "POST") {
+    // Démo : pour chaque automatisation, on fait comme si le mail du mois venait d'arriver.
+    const mb = (db.mailboxes ||= {})[user.id]; if (!mb) fail(400, "Reliez d'abord votre boîte mail.");
+    const month = new Date().toISOString().slice(0, 7); let filed = 0;
+    for (const r of (db.autos || []).filter((x) => x.user_id === user.id && x.active)) {
+      if (r.last_doc_at.startsWith(month)) continue;
+      const title = fillTitle(r.title || r.name);
+      const fd = new FormData(); fd.append("files", await fakeMailDoc(title, r.from_has), "piece-jointe.jpg");
+      const up = await handle("POST", "/api/uploads", fd); const sg = up.suggestion;
+      const vis = r.visibility.startsWith("custom:") ? { visibility: "custom", targets: r.visibility.slice(7).split(",").filter(Boolean) } : { visibility: r.visibility, targets: [] };
+      const d = await handle("POST", "/api/documents", { upload_id: up.upload_id, title, folder_id: r.folder_id || sg.folder_id, person_id: r.person_id || sg.person_id, doc_type: sg.doc_type,
+        year: String(new Date().getFullYear()), fields: {}, visibility: vis.visibility, targets: vis.targets });
+      r.last_doc_at = new Date().toISOString().slice(0, 19);
+      const fo = db.folders.find((x) => x.id === (r.folder_id || sg.folder_id)), par = db.folders.find((x) => x.id === fo?.parent_id);
+      notify(user.member_id, "auto", `Reçu par mail et rangé dans ${par ? par.name + " › " : ""}${fo?.name || ""} : « ${title} » (automatisation « ${r.name} »)`, `#/document/${d.id}`);
+      filed++;
+    }
+    mb.last_check = new Date().toISOString().slice(0, 19); save();
+    return { filed, mailbox: mb };
   }
   if (path === "/api/whatsapp") return { enabled: false, demo: true, bot_number: "", my_number: user.whatsapp || "" };
   if (path === "/api/whatsapp/me" && method === "PUT") { user.whatsapp = String(body.number || "").replace(/\D/g, ""); save(); return { my_number: user.whatsapp }; }

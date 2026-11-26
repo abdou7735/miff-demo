@@ -7,7 +7,7 @@ export const DEMO = !!window.MIFF_DEMO;
 let demoBackend = null;
 
 async function callDemo(method, url, body) {
-  if (!demoBackend) demoBackend = await import("./demo/backend.js?v=1795725424");
+  if (!demoBackend) demoBackend = await import("./demo/backend.js?v=1795728291");
   try { return await demoBackend.handle(method, url, body); }
   catch (e) {
     if (e.status === 401 && !url.startsWith("/api/login") && !url.startsWith("/api/me")) location.hash = "#/connexion";

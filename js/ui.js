@@ -1,5 +1,5 @@
 // Outils d'affichage communs.
-import { api, DEMO } from "./api.js?v=1795725424";
+import { api, DEMO } from "./api.js?v=1795728291";
 export function h(tag, attrs = {}, ...kids) {
   const el = document.createElementNS(tag === "svg" || attrs._svg ? "http://www.w3.org/2000/svg" : "http://www.w3.org/1999/xhtml", tag);
   for (const [k, v] of Object.entries(attrs || {})) {

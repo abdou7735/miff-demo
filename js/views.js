@@ -1,9 +1,9 @@
 // Les écrans de l'appli.
-import { api } from "./api.js?v=1795725424";
-import { openScanner } from "./scanner.js?v=1795725424";
-import { drawTree, familyView } from "./tree.js?v=1795725424";
-import { api as _a, DEMO } from "./api.js?v=1795725424";
-import { apiImg, apiLink, ask, errBox, folderIcon, frDate, fullName, h, icon, initials, sheet, squareJpeg, toast, VIS_LABEL, years } from "./ui.js?v=1795725424";
+import { api } from "./api.js?v=1795728291";
+import { openScanner } from "./scanner.js?v=1795728291";
+import { drawTree, familyView } from "./tree.js?v=1795728291";
+import { api as _a, DEMO } from "./api.js?v=1795728291";
+import { apiImg, apiLink, ask, errBox, folderIcon, frDate, fullName, h, icon, initials, sheet, squareJpeg, toast, VIS_LABEL, years } from "./ui.js?v=1795728291";
 
 export const state = { me: null, members: [], groups: null, treeScale: null, docTab: "dossiers", generation: null, pending: null };
 
@@ -826,6 +826,8 @@ export async function viewSettings() {
     ...demoBlock,
     h("div", { class: "prof" }, av(me.member, "big"), h("div", {}, h("h2", {}, fullName(me.member)), h("div", { class: "muted" }, `Identifiant : ${me.username}${me.is_admin ? " · administrateur" : ""}`))),
     h("a", { class: "btn sec", href: `#/personne/${me.member.id}` }, "Voir ma fiche"),
+    h("a", { class: "card autolink", href: "#/automatisations" }, h("h3", { style: "margin:0" }, "⚡ Automatisations"),
+      h("p", { class: "small muted", style: "margin:4px 0 0" }, "Relier ma boîte mail : la quittance de loyer, les factures, les fiches de paie… rangées toutes seules chaque mois.")),
     await whatsappCard(),
     installCard(),
     h("h2", {}, "Visibilité par défaut, dossier par dossier"),
@@ -1196,5 +1198,133 @@ export async function viewChat(key) {
       h("button", { class: "cbtn", "aria-label": "Partager un document", onclick: shareDoc }, "📄"),
       text, img,
       h("button", { class: "cbtn send", "aria-label": "Envoyer", onclick: () => send() }, "➤")),
+  ];
+}
+
+// ================================================================ Automatisations
+
+const AUTO_MODELS = [
+  { name: "Quittance de loyer", words: "quittance, loyer", folder: "quittances", title: "Quittance de loyer {mois} {annee}", expect_day: 10, hint: "ex. agence-immo.fr" },
+  { name: "Facture d'électricité", words: "facture", folder: "factures", title: "Facture d'électricité {mois} {annee}", hint: "ex. edf.fr" },
+  { name: "Facture internet / téléphone", words: "facture", folder: "factures", title: "Facture internet {mois} {annee}", hint: "ex. orange.fr, free.fr" },
+  { name: "Fiche de paie", words: "bulletin de paie, bulletin de salaire, fiche de paie", folder: "fiches-paie", title: "Fiche de paie {mois} {annee}", expect_day: 5, hint: "ex. nom de l'employeur" },
+  { name: "Relevé de banque", words: "relevé", folder: "banque", title: "Relevé de banque {mois} {annee}", hint: "ex. credit-agricole.fr" },
+  { name: "CAF", words: "attestation, notification", folder: "caf", title: "CAF {mois} {annee}", hint: "caf.fr" },
+  { name: "Impôts", words: "avis, impôt", folder: "impots", title: "Impôts {annee}", hint: "dgfip.finances.gouv.fr" },
+  { name: "Bulletin scolaire", words: "bulletin", folder: "college", title: "Bulletin scolaire {annee}", hint: "ex. nom de l'école ou pronote", visibility: "custom:rel:parents" },
+];
+
+function visOptions() {
+  const g = state.groups;
+  return [["private", "Moi seulement"], ["family", "Toute la famille"],
+    ...g.relations.map((x) => [`custom:rel:${x.key}`, x.name]),
+    ...g.custom.map((x) => [`custom:grp:${x.id}`, x.name])];
+}
+
+export async function viewAutos() {
+  const [data, fdata] = await Promise.all([api.get("/api/autos"), api.get("/api/folders")]);
+  state.groups = await api.get("/api/groups");
+  await loadMembers();
+  const subs = fdata.folders.flatMap((t) => t.children.map((c) => ({ ...c, top: t.name })));
+  const folderName = (id) => { const f = subs.find((x) => x.id === id); return f ? `${f.top} › ${f.name}` : "dossier choisi par Miff"; };
+  const visName = (v) => (visOptions().find(([k]) => k === v) || [v, "Personnalisé"])[1];
+  const rerender = () => window.dispatchEvent(new HashChangeEvent("hashchange"));
+
+  const mb = data.mailbox;
+  let boxCard;
+  if (!mb) {
+    const addr = h("input", { class: "field", type: "email", placeholder: "prenom.nom@gmail.com", autocomplete: "off" });
+    const pass = h("input", { class: "field", type: "password", placeholder: DEMO ? "Dans la démo, écrivez n'importe quoi" : "Mot de passe d'application", autocomplete: "new-password" });
+    const err = h("div");
+    boxCard = h("div", { class: "card" }, h("h3", {}, "✉️ Relier ma boîte mail"),
+      h("p", { class: "small muted", style: "margin:0 0 8px" }, "Miff relève votre boîte et range tout seul les mails que vous choisissez ci-dessous (quittance, factures…). Les autres mails ne sont ni lus ni gardés, et vos mails restent dans votre boîte."),
+      h("label", { class: "lbl" }, "Mon adresse mail"), addr,
+      h("label", { class: "lbl" }, "Mot de passe d'application"), pass,
+      h("details", { class: "small" }, h("summary", {}, "C'est quoi, un mot de passe d'application ?"),
+        h("p", {}, "C'est un mot de passe spécial, créé seulement pour Miff. Votre vrai mot de passe n'est jamais demandé, et vous pouvez le supprimer quand vous voulez."),
+        h("p", {}, h("b", {}, "Gmail : "), "Compte Google › Sécurité › Validation en deux étapes (à activer) › ", h("a", { href: "https://myaccount.google.com/apppasswords", target: "_blank", rel: "noopener" }, "Mots de passe des applications"), ". Copiez les 16 lettres."),
+        h("p", {}, h("b", {}, "Orange, Free, SFR, La Poste : "), "votre mot de passe de messagerie habituel suffit en général."),
+        h("p", {}, h("b", {}, "Yahoo, iCloud : "), "créez un « mot de passe d'application » dans les réglages de sécurité du compte.")),
+      err,
+      h("button", { class: "btn", onclick: async (e) => {
+        e.target.disabled = true; e.target.textContent = "Connexion…";
+        try { await api.put("/api/mailbox", { address: addr.value, password: pass.value }); toast("Boîte mail reliée"); rerender(); }
+        catch (x) { err.replaceChildren(errBox(x)); e.target.disabled = false; e.target.textContent = "Relier ma boîte"; }
+      } }, "Relier ma boîte"));
+  } else {
+    const status = h("div", { class: "small muted" }, mb.error ? h("span", { class: "tag warn" }, mb.error) : (mb.last_check ? `Dernière relève : ${frDate(mb.last_check.slice(0, 10))} à ${mb.last_check.slice(11, 16)}` : "Pas encore relevée"));
+    boxCard = h("div", { class: "card" }, h("h3", {}, "✉️ Ma boîte mail"),
+      h("div", { class: "set" }, h("b", {}, mb.address), h("span", { class: "tag ok" }, "Reliée")), status,
+      h("p", { class: "small muted" }, "Miff la relève toutes les 10 minutes environ."),
+      h("div", { class: "row", style: "gap:8px;flex-wrap:wrap" },
+        h("button", { class: "btn sec", onclick: async (e) => {
+          e.target.disabled = true; e.target.textContent = "Relève…";
+          try { const r = await api.post("/api/mailbox/check", {}); toast(r.filed ? `${r.filed} document${r.filed > 1 ? "s" : ""} rangé${r.filed > 1 ? "s" : ""}` : "Aucun nouveau document"); rerender(); }
+          catch (x) { toast(x.message); e.target.disabled = false; }
+        } }, "Relever maintenant"),
+        h("button", { class: "btn ghost", onclick: async () => { if (await ask("Déconnecter votre boîte mail ? Les documents déjà rangés restent dans Miff.")) { await api.del("/api/mailbox"); rerender(); } } }, "Déconnecter")));
+  }
+
+  const ruleCard = (r) => h("div", { class: `card auto ${r.active ? "" : "off"}` },
+    h("div", { class: "set" }, h("h3", { style: "margin:0" }, r.name),
+      h("label", { class: "switch" }, h("input", { type: "checkbox", checked: r.active, onchange: async (e) => { await api.put(`/api/autos/${r.id}`, { ...r, active: e.target.checked }); toast(e.target.checked ? "Activée" : "En pause"); rerender(); } }), h("span", {}))),
+    h("p", { class: "small", style: "margin:6px 0 0" }, "Quand un mail ",
+      r.from_has ? [h("b", {}, `vient de « ${r.from_has} »`), r.words ? " et " : ""] : "",
+      r.words ? h("b", {}, `contient « ${r.words.split(",").map((x) => x.trim()).join(" » ou « ")} »`) : "",
+      " → rangé dans ", h("b", {}, folderName(r.folder_id)),
+      r.title ? [", sous le nom ", h("b", {}, `« ${r.example_title} »`)] : "",
+      r.person_id ? [", au nom de ", h("b", {}, M(r.person_id)?.first_name || "?")] : "",
+      ", ", h("b", {}, visName(r.visibility).toLowerCase()), "."),
+    r.expect_day ? h("p", { class: "small muted", style: "margin:4px 0 0" }, `⏰ Alerte s'il n'est pas arrivé le ${r.expect_day} du mois.`) : null,
+    r.last_doc_at ? h("p", { class: "small muted", style: "margin:4px 0 0" }, `Dernier document : ${frDate(r.last_doc_at.slice(0, 10))}`) : null,
+    h("div", { class: "row", style: "gap:8px;margin-top:8px" },
+      h("button", { class: "chip", onclick: () => ruleSheet(r) }, "Modifier"),
+      h("button", { class: "chip", onclick: async () => { if (await ask(`Supprimer « ${r.name} » ?`)) { await api.del(`/api/autos/${r.id}`); rerender(); } } }, "Supprimer")));
+
+  function ruleSheet(r, model) {
+    const v = r || { name: model?.name || "", from_has: "", words: model?.words || "", folder_id: subs.find((x) => x.slug === model?.folder)?.id || null,
+      person_id: null, title: model?.title || "", visibility: model?.visibility || "private", expect_day: model?.expect_day || 0, active: true };
+    const name = h("input", { class: "field", value: v.name, placeholder: "ex. Quittance de loyer" });
+    const from = h("input", { class: "field", value: v.from_has, placeholder: model?.hint || "ex. agence-immo.fr ou le nom de l'expéditeur" });
+    const words = h("input", { class: "field", value: v.words, placeholder: "ex. quittance, loyer" });
+    const folder = h("select", { class: "field" }, h("option", { value: "" }, "Laisser Miff choisir"),
+      fdata.folders.map((t) => h("optgroup", { label: t.name }, t.children.map((c) => h("option", { value: c.id, selected: c.id === v.folder_id }, c.name)))));
+    const person = h("select", { class: "field" }, h("option", { value: "" }, "Laisser Miff choisir"),
+      state.members.slice().sort((a, b) => a.first_name.localeCompare(b.first_name)).map((m) => h("option", { value: m.id, selected: m.id === v.person_id }, fullName(m) + (m.id === state.me.member.id ? " (moi)" : ""))));
+    const title = h("input", { class: "field", value: v.title, placeholder: "ex. Quittance de loyer {mois} {annee}" });
+    const vis = h("select", { class: "field" }, visOptions().map(([k, l]) => h("option", { value: k, selected: k === v.visibility }, l)));
+    const expect = h("select", { class: "field" }, h("option", { value: 0 }, "Non"), Array.from({ length: 28 }, (_, i) => h("option", { value: i + 1, selected: i + 1 === v.expect_day }, `Oui, s'il n'est pas arrivé le ${i + 1} du mois`)));
+    const err = h("div");
+    const close = sheet(h("h2", {}, r ? "Modifier l'automatisation" : "Nouvelle automatisation"),
+      h("label", { class: "lbl" }, "Nom"), name,
+      h("h3", { style: "margin:14px 0 0" }, "Quels mails ?"),
+      h("label", { class: "lbl" }, "L'expéditeur contient"), from,
+      h("label", { class: "lbl" }, "L'objet ou le mail contient l'un de ces mots (séparés par des virgules)"), words,
+      h("h3", { style: "margin:14px 0 0" }, "Où les ranger ?"),
+      h("label", { class: "lbl" }, "Dossier"), folder,
+      h("label", { class: "lbl" }, "Au nom de"), person,
+      h("label", { class: "lbl" }, "Nom du document"), title,
+      h("p", { class: "small muted", style: "margin:2px 0 0" }, "{mois} et {annee} sont remplacés tout seuls, ex. « novembre 2026 »."),
+      h("label", { class: "lbl" }, "Qui peut le voir"), vis,
+      h("label", { class: "lbl" }, "Me prévenir s'il n'arrive pas"), expect,
+      err,
+      h("button", { class: "btn", onclick: async () => {
+        const body = { name: name.value, from_has: from.value, words: words.value, folder_id: Number(folder.value) || null, person_id: Number(person.value) || null,
+          title: title.value, visibility: vis.value, expect_day: Number(expect.value) || 0, active: v.active };
+        try { if (r) await api.put(`/api/autos/${r.id}`, body); else await api.post("/api/autos", body); close(); toast("Enregistré"); rerender(); }
+        catch (x) { err.replaceChildren(errBox(x)); }
+      } }, "Enregistrer"),
+      h("button", { class: "btn ghost", onclick: () => close() }, "Annuler"));
+  }
+
+  return [
+    h("p", { class: "muted", style: "margin-top:0" }, "Les papiers qui arrivent tous les mois par mail (quittance, factures, fiches de paie…) sont rangés tout seuls dans Miff, sans rien faire."),
+    boxCard,
+    h("h2", {}, "Mes automatisations"),
+    data.rules.length ? data.rules.map(ruleCard) : h("p", { class: "small muted" }, "Aucune pour l'instant. Choisissez un exemple ci-dessous pour commencer."),
+    h("h3", {}, "Ajouter"),
+    h("div", { class: "wrapchips" }, AUTO_MODELS.map((mo) => h("button", { class: "chip", onclick: () => ruleSheet(null, mo) }, "+ " + mo.name)),
+      h("button", { class: "chip", onclick: () => ruleSheet(null, null) }, "+ Autre")),
+    h("p", { class: "small muted" }, "Les automatisations servent aussi pour les documents envoyés par WhatsApp."),
   ];
 }
