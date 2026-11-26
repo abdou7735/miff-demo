@@ -279,3 +279,5 @@ body.inchat main{padding-bottom:calc(150px + var(--safeB))}
 body.treefull{overflow:hidden}
 .legend i.me{background:#d6f0e0;box-shadow:inset 0 0 0 2px #1f6a4b}
 .legend i.dead{background:#fff;border:1.5px dashed #9aa5ae;width:9px;height:9px}
+@media(min-width:700px){.treecanvas{width:calc(100vw - 40px);margin-left:calc(50% - 50vw + 20px);margin-right:0;border:1px solid var(--line);border-radius:16px;height:min(70vh,760px)}}
+body{overflow-x:hidden}

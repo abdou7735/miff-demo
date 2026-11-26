@@ -31,9 +31,12 @@ export const SEED = {
     { id: 28, first_name: "Noé", last_name: "Haddad", sex: "M", birth_date: "2003-07-17", father_id: 21, mother_id: 27 },
     { id: 29, first_name: "Léa", last_name: "Haddad", sex: "F", birth_date: "2007-02-03", father_id: 21, mother_id: 27 },
     { id: 30, first_name: "Thomas", last_name: "Leroy", sex: "M", birth_date: "1995-03-18" },
+    { id: 32, first_name: "Nadia", last_name: "Said", birth_name: "Mze", sex: "F", birth_date: "1994-05-02", notes: "Exemple inventé pour la démonstration." },
+    { id: 33, first_name: "Ilyes", last_name: "Said", sex: "M", birth_date: "2019-10-08", father_id: 8, mother_id: 32 },
+    { id: 34, first_name: "Sara", last_name: "Said", sex: "F", birth_date: "2022-03-15", father_id: 8, mother_id: 32 },
     { id: 31, first_name: "Aya", last_name: "Leroy", sex: "F", birth_date: "2026-09-14", birth_place: "Mamoudzou", father_id: 30, mother_id: 22 },
   ],
-  unions: [[1, 2], [3, 4], [5, 6], [7, 24], [19, 20], [21, 27], [22, 30]],
+  unions: [[1, 2], [3, 4], [5, 6], [7, 24], [19, 20], [21, 27], [22, 30], [8, 32]],
   users: [
     { member_id: 9, username: "ambdoulhafour", password: "demo1234", is_admin: true },
     { member_id: 11, username: "youssra", password: "demo1234", is_admin: false },

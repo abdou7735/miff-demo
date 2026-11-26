@@ -1,6 +1,6 @@
 // Dessin de l'arbre familial en SVG.
-// Deux vues : « autour d'une personne » (proche ou famille, centrée sur elle)
-// et « tout l'arbre » (génération par génération).
+// Deux vues : « toute la famille » (centrée sur moi, les foyers de ma génération repliés)
+// et « le foyer d'une personne » (elle, son conjoint et leurs descendants).
 import { s, initials, years } from "./ui.js";
 
 const NODE_W = 104, ROW_H = 140, R = 30, TOP = 64, GAP = 24, GRID_ROW = 132, PAD = 10;
@@ -86,9 +86,41 @@ export function familyColors(members, meId) {
   return (id) => col.get(keyOf.get(id)) || PALETTE[0];
 }
 
+// Qui afficher, et quels foyers replier (conjoint en petit à côté, enfants cachés).
+export function familyView(allMembers, meId, focus) {
+  const A = relations(allMembers);
+  const gen = (id) => A.by.get(id)?.generation || 0;
+  const inLaw = (id) => !A.parents(id).length && A.spouses(id).some((sp) => A.parents(sp).length);
+  let shown, cut;
+  if (focus && A.by.has(focus)) {
+    shown = new Set([focus, ...A.spouses(focus)]);
+    const todo = [...shown];
+    while (todo.length) { const x = todo.pop(); for (const k of A.children(x)) if (!shown.has(k)) { shown.add(k); todo.push(k); } }
+    cut = gen(focus) + 1;
+  } else { shown = new Set(A.by.keys()); cut = gen(meId); }
+  const removed = new Set(), folds = new Map();
+  for (const id of [...shown].sort((a, b) => gen(a) - gen(b) || a - b)) {
+    if (removed.has(id) || gen(id) < cut || inLaw(id)) continue;
+    const sps = A.spouses(id).filter((sp) => shown.has(sp) && !A.parents(sp).length);
+    const kids = A.children(id).filter((k) => shown.has(k));
+    if (!sps.length && !kids.length) continue;
+    sps.forEach((sp) => removed.add(sp));
+    const todo = [...kids];
+    while (todo.length) {
+      const x = todo.pop(); if (removed.has(x)) continue; removed.add(x);
+      todo.push(...A.children(x)); A.spouses(x).forEach((sp) => { if (!A.parents(sp).length) removed.add(sp); });
+    }
+    folds.set(id, { spouse: sps[0] ?? A.spouses(id)[0] ?? null, kids: A.children(id).length });
+  }
+  for (const r of removed) shown.delete(r);
+  return { shown, folds };
+}
+
 export function drawTree(allMembers, meId, onPick, opts = {}) {
-  const { scale = 1, centerId = meId, level = 3, onExpand = null } = opts;
-  const shown = circle(allMembers, centerId, level);
+  const { scale = 1, focus = null, onFamily = null } = opts;
+  const centerId = meId, level = focus ? 3 : 1;
+  const { shown, folds } = familyView(allMembers, meId, focus);
+  const allBy = new Map(allMembers.map((m) => [m.id, m]));
   const members = allMembers.filter((m) => shown.has(m.id));
   const T = relations(members);
   const by = T.by;
@@ -272,28 +304,34 @@ export function drawTree(allMembers, meId, onPick, opts = {}) {
     lines.append(s("path", { d: `M${a.x} ${a.y - R}C${a.x} ${a.y - R - lift},${b.x} ${b.y - R - lift},${b.x} ${b.y - R}`, "stroke-dasharray": "6 5" }));
   }
 
-  const hidden = level < 3 ? hiddenCounts(allMembers, shown) : new Map();
   const nodes = s("g", {});
   for (const m of members) {
     const p = pos.get(m.id); if (!p) continue;
-    const isMe = m.id === meId, isCenter = m.id === centerId && centerId !== meId, dead = m.deceased || m.death_date;
+    const isMe = m.id === meId, dead = m.deceased || m.death_date;
     const [fill, ink] = colorOf(m.id);
     const sub = m.relation && m.relation !== "Moi" ? m.relation : years(m);
     const g = s("g", { class: "node", "data-id": m.id, tabindex: "0", role: "button", "aria-label": `${m.first_name}${m.relation ? ", " + m.relation : ""}, ouvrir la fiche`,
       onclick: () => onPick(m.id), onkeydown: (e) => { if (e.key === "Enter") onPick(m.id); } },
-      isCenter ? s("circle", { cx: p.x, cy: p.y, r: R + 5, fill: "none", stroke: "#1f6a4b", "stroke-width": "2", "stroke-dasharray": "4 3" }) : null,
       s("circle", { cx: p.x, cy: p.y, r: R, fill, stroke: isMe ? ink : dead ? "#9aa5ae" : "#fff", "stroke-width": isMe ? "4" : "2", "stroke-dasharray": dead && !isMe ? "3 3" : null }),
       s("text", { x: p.x, y: p.y + 5, "text-anchor": "middle", "font-size": "15", "font-weight": "700", fill: ink }, initials(m)),
       s("text", { x: p.x, y: p.y + R + 20, "text-anchor": "middle", "font-size": m.first_name.length > 10 ? "13" : "15", "font-weight": "600", fill: "#14201a" }, trunc(m.first_name, 14)),
       sub ? s("text", { x: p.x, y: p.y + R + 37, "text-anchor": "middle", "font-size": "12.5", fill: m.relation && m.relation !== "Moi" ? "#1f6a4b" : "#5b6b63" }, trunc(sub, 14)) : null);
     nodes.append(g);
-    const n = hidden.get(m.id);
-    if (n && onExpand) {
-      const bx = p.x + R - 2, by2 = p.y - R + 4;
-      nodes.append(s("g", { class: "more", tabindex: "0", role: "button", "aria-label": `Voir ${n} proche${n > 1 ? "s" : ""} de ${m.first_name}`,
-        onclick: (e) => { e.stopPropagation(); onExpand(m.id); }, onkeydown: (e) => { if (e.key === "Enter") onExpand(m.id); } },
-        s("rect", { x: bx - 4, y: by2 - 12, width: 34, height: 24, rx: 12, fill: "#fff", stroke: "#1f6a4b", "stroke-width": "1.5" }),
-        s("text", { x: bx + 13, y: by2 + 5, "text-anchor": "middle", "font-size": "13", "font-weight": "700", fill: "#1f6a4b" }, `+${n}`)));
+    // Foyer replié : le conjoint en petit à côté, et le nombre d'enfants. Un toucher ouvre son arbre.
+    const f = folds.get(m.id);
+    if (f && onFamily) {
+      const sp = f.spouse && allBy.get(f.spouse);
+      const [sf, si] = sp ? colorOf(sp.id) : [fill, ink];
+      const bx = p.x + R + 2, by2 = p.y - R + 8, br = 15;
+      const who = (sp ? `${m.first_name} et ${sp.first_name}` : m.first_name) + (f.kids ? `, ${f.kids} enfant${f.kids > 1 ? "s" : ""}` : "");
+      nodes.append(s("g", { class: "fold", tabindex: "0", role: "button", "aria-label": `Voir la famille de ${who}`,
+        onclick: (e) => { e.stopPropagation(); onFamily(m.id); }, onkeydown: (e) => { if (e.key === "Enter") onFamily(m.id); } },
+        s("circle", { cx: bx, cy: by2, r: br + 3, fill: "#fff" }),
+        s("circle", { cx: bx, cy: by2, r: br, fill: sf, stroke: si, "stroke-width": "1.5" }),
+        s("text", { x: bx, y: by2 + 4, "text-anchor": "middle", "font-size": "10.5", "font-weight": "700", fill: si }, sp ? initials(sp) : "♥"),
+        f.kids ? s("g", {},
+          s("circle", { cx: bx + 13, cy: by2 + 12, r: 9, fill: si, stroke: "#fff", "stroke-width": "1.5" }),
+          s("text", { x: bx + 13, y: by2 + 15.5, "text-anchor": "middle", "font-size": "10", "font-weight": "700", fill: "#fff" }, String(f.kids))) : null));
     }
   }
   const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, width: W * scale, height: H * scale, role: "img", "aria-label": "Arbre familial" }, lines, nodes);

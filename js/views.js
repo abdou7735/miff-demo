@@ -1,7 +1,7 @@
 // Les écrans de l'appli.
 import { api } from "./api.js";
 import { openScanner } from "./scanner.js";
-import { drawTree } from "./tree.js";
+import { drawTree, familyView } from "./tree.js";
 import { api as _a, DEMO } from "./api.js";
 import { apiImg, apiLink, ask, errBox, folderIcon, frDate, fullName, h, icon, initials, sheet, toast, VIS_LABEL, years } from "./ui.js";
 
@@ -106,13 +106,13 @@ export async function viewInvite(token) {
 export async function viewTree() {
   await loadMembers();
   const meId = state.me.member.id;
-  if (!state.tree) state.tree = { level: 1, center: meId, scale: null };
+  if (!state.tree) state.tree = { focus: null, center: meId };
   const st = state.tree;
   if (!M(st.center)) st.center = meId;
+  if (st.focus && !M(st.focus)) st.focus = null;
   const world = h("div", { class: "treeworld" });
   const box = h("div", { class: "treecanvas", "aria-label": "Arbre : glissez pour vous déplacer, pincez ou utilisez la molette pour zoomer" }, world);
   const pick = (id) => (location.hash = `#/personne/${id}`);
-  const levels = h("div", { class: "sub", role: "tablist", "aria-label": "Jusqu'où voir" });
   const banner = h("div");
   const info = h("div", { class: "hint" });
   // La vue : décalage (x, y) et zoom (k). L'arbre est dessiné une fois, on le déplace en entier.
@@ -139,16 +139,17 @@ export async function viewTree() {
     apply();
   };
   function render(recenter) {
-    svg = drawTree(state.members, meId, pick, { scale: 1, centerId: st.center, level: st.level, onExpand: (id) => { st.center = id; render(true); } });
+    const openFamily = (id) => { st.focus = id; st.center = id; render(true); };
+    svg = drawTree(state.members, meId, pick, { scale: 1, focus: st.focus, onFamily: openFamily });
     W = Number(svg.getAttribute("width")); H = Number(svg.getAttribute("height"));
     world.replaceChildren(svg);
-    levels.replaceChildren(...[[1, "Proche"], [2, "Famille"], [3, "Tout l'arbre"]].map(([l, txt]) =>
-      h("button", { class: st.level === l ? "on" : "", role: "tab", "aria-selected": st.level === l ? "true" : "false", onclick: () => { st.level = l; render(true); } }, txt)));
-    const c = M(st.center);
-    banner.replaceChildren(...(st.center !== meId && c && st.level < 3 ? [h("div", { class: "centerbar" }, h("span", {}, "Vu depuis ", h("b", {}, c.first_name)),
-      h("button", { onclick: () => { st.center = meId; render(true); } }, "Revenir à moi"))] : []));
+    const f = st.focus && M(st.focus);
+    const sp = f && (f.spouses || []).map(M).filter(Boolean)[0];
+    banner.replaceChildren(...(f ? [h("div", { class: "centerbar" },
+      h("button", { onclick: () => { const back = st.focus; st.focus = null; st.center = back; render(true); } }, "← Toute la famille"),
+      h("span", {}, "Famille de ", h("b", {}, f.first_name), sp ? [" & ", h("b", {}, sp.first_name)] : null))] : []));
     const shown = svg.querySelectorAll(".node").length;
-    info.textContent = `${shown} personne${shown > 1 ? "s" : ""} sur ${state.members.length}. Glissez pour vous déplacer, pincez (ou molette) pour zoomer. Touchez une personne pour ouvrir sa fiche.`;
+    info.textContent = `Glissez pour vous déplacer, pincez (ou molette) pour zoomer. Touchez une personne pour ouvrir sa fiche. Touchez le petit rond à côté de quelqu'un de marié pour voir sa famille.`;
     if (recenter) requestAnimationFrame(() => centerOn(st.center, true));
     else apply();
   }
@@ -220,12 +221,32 @@ export async function viewTree() {
   const search = h("input", { class: "field", type: "search", placeholder: "Chercher quelqu'un (prénom)", "aria-label": "Chercher quelqu'un dans l'arbre", oninput: () => {
     const q = norm(search.value.trim());
     results.replaceChildren(...(q ? state.members.filter((m) => norm(fullName(m)).includes(q)).slice(0, 6).map((m) =>
-      h("button", { class: "chip", onclick: () => { st.center = m.id; st.level = Math.max(st.level, 1) === 3 ? 3 : 2; search.value = ""; results.replaceChildren(); render(true); } }, m.first_name, m.relation && m.relation !== "Moi" ? ` · ${m.relation.toLowerCase()}` : "")) : []));
+      h("button", { class: "chip", onclick: () => { goTo(m.id); search.value = ""; results.replaceChildren(); } }, m.first_name, m.relation && m.relation !== "Moi" ? ` · ${m.relation.toLowerCase()}` : "")) : []));
   } });
+  // Aller à quelqu'un : dans toute la famille si on l'y voit, sinon dans le foyer qui le contient.
+  const goTo = (id) => {
+    st.center = id;
+    for (const focus of [null, ...homesOf(id)]) {
+      if (familyView(state.members, meId, focus).shown.has(id)) { st.focus = focus; break; }
+    }
+    render(true);
+  };
+  // Les foyers qui peuvent contenir quelqu'un : le sien, puis celui de ses parents, grands-parents…
+  const homesOf = (id) => {
+    const out = [], x0 = M(id);
+    if (x0 && (x0.spouses?.length || state.members.some((k) => k.father_id === id || k.mother_id === id))) out.push(id);
+    for (let x = x0; x; ) {
+      const ps = [x.father_id, x.mother_id].map(M).filter(Boolean);
+      const blood = ps.find((p) => p.father_id || p.mother_id) || ps[0];
+      if (blood) out.push(blood.id);
+      x = blood;
+    }
+    return out;
+  };
   render(true);
   const me = M(meId);
   return [
-    levels, banner,
+    banner,
     box,
     h("div", { class: "legend" }, h("span", {}, h("i", { class: "me" }), "Moi"), h("span", {}, h("i", { style: "background:#d6f0e0" }), h("i", { style: "background:#d6e7fa;margin-left:-4px" }), h("i", { style: "background:#fadbe5;margin-left:-4px" }), "Une couleur par famille"), h("span", {}, h("i", { class: "dead" }), "Décédé")),
     info, search, results,
@@ -256,7 +277,7 @@ export async function viewPerson(id) {
   info("email", "E-mail", p.email && h("a", { href: `mailto:${p.email}` }, p.email));
   const actions = [];
   actions.push(h("div", { class: "row" },
-    h("button", { class: "btn sec", onclick: () => { state.tree = { level: 1, center: p.id, scale: null }; location.hash = "#/arbre"; } }, "Voir sa famille dans l'arbre"),
+    h("button", { class: "btn sec", onclick: () => { state.tree = { focus: (p.spouses.length || p.children.length) ? p.id : null, center: p.id }; location.hash = "#/arbre"; } }, "Voir sa famille dans l'arbre"),
     !isMe && p.has_account ? h("a", { class: "btn sec", href: `#/chat/${dmKey(state.me.member.id, p.id)}` }, `Écrire à ${p.first_name}`) : null));
   if (p.can_edit) actions.push(h("div", { class: "row" },
     h("button", { class: "btn sec", onclick: () => editPerson(p) }, "Modifier la fiche"),
@@ -856,7 +877,7 @@ export function birthSheet() {
     const fd = new FormData();
     for (const k of ["first_name", "last_name", "sex", "birth_date", "birth_place", "father_id", "mother_id", "message"]) fd.append(k, f[k].value);
     if (photo.files[0]) fd.append("photo", photo.files[0]);
-    try { const r = await api.form("/api/births", fd); close(); toast("Naissance annoncée à toute la famille"); state.tree = { level: 1, center: r.id, scale: null }; location.hash = `#/personne/${r.id}`; }
+    try { const r = await api.form("/api/births", fd); close(); toast("Naissance annoncée à toute la famille"); state.tree = null; location.hash = `#/personne/${r.id}`; }
     catch (x) { err.replaceChildren(errBox(x)); btn.disabled = false; }
   } },
     h("h2", {}, "Annoncer une naissance"),

@@ -4,7 +4,7 @@ import { analyze, norm, TYPE_LABELS } from "./recognize.js";
 import { detectQuad, loadBitmap, processImage } from "./image.js";
 import { makeSeedPages, SEED } from "./seed.js";
 
-const KEY = "miff-demo-db-v5", SESSION = "miff-demo-user";
+const KEY = "miff-demo-db-v6", SESSION = "miff-demo-user";
 
 const RELATION_GROUPS = {
   parents: "Mes parents", siblings: "Mes frères et sœurs", spouse: "Mon conjoint", children: "Mes enfants",
