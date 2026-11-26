@@ -259,3 +259,11 @@ a.me{text-decoration:none}
 .cbtn.send{background:var(--green);color:#fff}
 body.inchat main{padding-bottom:calc(150px + var(--safeB))}
 .chatlist{padding-bottom:70px}
+
+/* Fiche : infos privées */
+.privtag { display: inline-block; margin-left: 8px; font-size: 12px; color: var(--muted, #667); background: #f1f3f2; border-radius: 8px; padding: 1px 7px; vertical-align: middle; }
+.privrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 2px; border-bottom: 1px solid #eef0ef; cursor: pointer; }
+.privrow:last-child { border-bottom: 0; }
+.privrow span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.privrow small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.privrow input { width: 22px; height: 22px; accent-color: var(--green, #1f6b4f); flex: none; }

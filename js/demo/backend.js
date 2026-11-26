@@ -4,7 +4,7 @@ import { analyze, norm, TYPE_LABELS } from "./recognize.js";
 import { detectQuad, loadBitmap, processImage } from "./image.js";
 import { makeSeedPages, SEED } from "./seed.js";
 
-const KEY = "miff-demo-db-v4", SESSION = "miff-demo-user";
+const KEY = "miff-demo-db-v5", SESSION = "miff-demo-user";
 
 const RELATION_GROUPS = {
   parents: "Mes parents", siblings: "Mes frères et sœurs", spouse: "Mon conjoint", children: "Mes enfants",
@@ -181,8 +181,16 @@ function canView(user, d, tree) {
   return false;
 }
 
-function memberPublic(m, tree, me, gens, accs) {
-  return { ...m, spouses: [...tree.spouses(m.id)].sort((a, b) => a - b), generation: gens.get(m.id) || 0, relation: tree.relation(me, m.id), has_account: accs.has(m.id) };
+const INFO_FIELDS = ["birth_date", "birth_place", "city", "job", "phone", "email", "notes"];
+const privOf = (m) => (m.private_fields ?? ["phone", "email"]).filter((f) => INFO_FIELDS.includes(f));
+function memberPublic(m, tree, me, gens, accs, viewer) {
+  const d = { phone: "", email: "", city: "", job: "", ...m, private_fields: privOf(m), spouses: [...tree.spouses(m.id)].sort((a, b) => a - b), generation: gens.get(m.id) || 0, relation: tree.relation(me, m.id), has_account: accs.has(m.id) };
+  if (viewer && !(viewer.is_admin || m.id === viewer.member_id || !accs.has(m.id))) {
+    d.hidden_count = d.private_fields.filter((f) => m[f]).length;
+    for (const f of d.private_fields) d[f] = "";
+    d.private_fields = [];
+  }
+  return d;
 }
 function docPublic(d, user) {
   const f = db.folders.find((x) => x.id === d.folder_id) || {};
@@ -377,7 +385,7 @@ export async function handle(method, url, body) {
   if (R(/^\/api\/accounts\/(\d+)\/reset$/)) { const t = db.users.find((x) => x.id === Number(m[1])); const pw = Math.random().toString(36).slice(2, 10); t.password = pw; save(); return { temporary_password: pw }; }
 
   // Arbre
-  if (path === "/api/members" && method === "GET") { const gens = tree.generations(); return db.members.map((x) => memberPublic(x, tree, user.member_id, gens, accs)); }
+  if (path === "/api/members" && method === "GET") { const gens = tree.generations(); return db.members.map((x) => memberPublic(x, tree, user.member_id, gens, accs, user)); }
   if (path === "/api/members" && method === "POST") {
     if (!(body.first_name || "").trim()) fail(400, "Le prénom est obligatoire.");
     let { father_id = null, mother_id = null } = body;
@@ -388,7 +396,8 @@ export async function handle(method, url, body) {
     }
     const id = nextId("members");
     db.members.push({ id, first_name: body.first_name.trim(), last_name: (body.last_name || "").trim(), birth_name: body.birth_name || "", sex: body.sex || "", birth_date: body.birth_date || "",
-      birth_place: body.birth_place || "", death_date: body.death_date || "", deceased: !!(body.deceased || body.death_date), notes: body.notes || "", father_id, mother_id });
+      birth_place: body.birth_place || "", death_date: body.death_date || "", deceased: !!(body.deceased || body.death_date), notes: body.notes || "", father_id, mother_id,
+      phone: (body.phone || "").trim(), email: (body.email || "").trim(), city: (body.city || "").trim(), job: (body.job || "").trim(), private_fields: body.private_fields || ["phone", "email"] });
     if (body.spouse_of) db.unions.push({ id: nextId("unions"), a_id: body.spouse_of, b_id: id });
     if (body.parent_of) {
       const c = db.members.find((x) => x.id === body.parent_of); const col = body.sex === "F" ? "mother_id" : "father_id";
@@ -402,13 +411,15 @@ export async function handle(method, url, body) {
     if (method === "GET") {
       const gens = tree.generations();
       const docs = db.docs.filter((d) => d.person_id === id && (canView(user, d, tree) || !d.hidden)).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((d) => canView(user, d, tree) ? docPublic(d, user) : lockedPublic(d, user));
-      return { ...memberPublic(x, tree, user.member_id, gens, accs), parents: [...tree.parents(id)], children: [...tree.children(id)], siblings: [...tree.siblings(id)], documents: docs,
+      return { ...memberPublic(x, tree, user.member_id, gens, accs, user), parents: [...tree.parents(id)], children: [...tree.children(id)], siblings: [...tree.siblings(id)], documents: docs,
         can_edit: user.is_admin || id === user.member_id || !accs.has(id) };
     }
     if (method === "PATCH") {
       if (!(user.is_admin || id === user.member_id || !accs.has(id))) fail(403, "Seule cette personne ou l'administrateur peut modifier sa fiche.");
       Object.assign(x, { first_name: body.first_name, last_name: body.last_name, birth_name: body.birth_name, sex: body.sex, birth_date: body.birth_date, birth_place: body.birth_place,
-        death_date: body.death_date, deceased: !!(body.deceased || body.death_date), notes: body.notes, father_id: body.father_id, mother_id: body.mother_id });
+        death_date: body.death_date, deceased: !!(body.deceased || body.death_date), notes: body.notes, father_id: body.father_id, mother_id: body.mother_id,
+        phone: (body.phone || "").trim(), email: (body.email || "").trim(), city: (body.city || "").trim(), job: (body.job || "").trim(),
+        private_fields: body.private_fields ? INFO_FIELDS.filter((f) => body.private_fields.includes(f)) : privOf(x) });
       save(); return { ok: true };
     }
     if (method === "DELETE") {

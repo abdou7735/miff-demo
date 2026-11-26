@@ -177,14 +177,24 @@ export async function viewPerson(id) {
   const isMe = p.id === state.me.member.id;
   const rel = (label, ids) => ids.length ? [h("dt", {}, label), h("dd", {}, h("div", { class: "people" }, ids.map(personChip)))] : [];
   const infos = [];
-  if (p.birth_date || p.birth_place) infos.push(h("dt", {}, "Naissance"), h("dd", {}, [frDate(p.birth_date), p.birth_place && `à ${p.birth_place}`].filter(Boolean).join(" ")));
+  const priv = new Set(p.private_fields || []);
+  const lock = (k) => (p.can_edit && priv.has(k) ? h("span", { class: "privtag" }, "🔒 privé") : null);
+  const info = (k, label, value) => { if (value) infos.push(h("dt", {}, label), h("dd", {}, value, lock(k))); };
+  info("birth_date", "Naissance", frDate(p.birth_date));
+  info("birth_place", "Lieu de naissance", p.birth_place);
   if (p.death_date || p.deceased) infos.push(h("dt", {}, "Décès"), h("dd", {}, frDate(p.death_date) || "Oui"));
   if (p.birth_name) infos.push(h("dt", {}, "Nom de naissance"), h("dd", {}, p.birth_name));
+  info("city", "Habite à", p.city);
+  info("job", "Métier", p.job);
+  info("phone", "Téléphone", p.phone && h("a", { href: `tel:${p.phone.replace(/\s/g, "")}` }, p.phone));
+  info("email", "E-mail", p.email && h("a", { href: `mailto:${p.email}` }, p.email));
   const actions = [];
   actions.push(h("div", { class: "row" },
     h("button", { class: "btn sec", onclick: () => { state.tree = { level: 1, center: p.id, scale: null }; location.hash = "#/arbre"; } }, "Voir sa famille dans l'arbre"),
     !isMe && p.has_account ? h("a", { class: "btn sec", href: `#/chat/${dmKey(state.me.member.id, p.id)}` }, `Écrire à ${p.first_name}`) : null));
-  if (p.can_edit) actions.push(h("button", { class: "btn ghost", onclick: () => editPerson(p) }, "Modifier la fiche"));
+  if (p.can_edit) actions.push(h("div", { class: "row" },
+    h("button", { class: "btn sec", onclick: () => editPerson(p) }, "Modifier la fiche"),
+    h("button", { class: "btn sec", onclick: () => privacySheet(p, isMe) }, isMe ? "Ce que la famille voit" : "Infos visibles")));
   actions.push(h("div", { class: "row" },
     h("button", { class: "btn sec", onclick: () => editPerson(null, { parent_of: p.id }) }, "+ Parent"),
     h("button", { class: "btn sec", onclick: () => editPerson(null, { spouse_of: p.id }) }, "+ Conjoint"),
@@ -197,14 +207,46 @@ export async function viewPerson(id) {
   return [
     h("div", { class: "prof" }, av(p, "big"), h("div", {}, h("h2", {}, fullName(p)),
       h("div", { class: "muted" }, [p.relation, years(p), p.has_account ? "a un compte" : "pas encore de compte"].filter(Boolean).join(" · ")))),
-    h("div", { class: "card" }, h("dl", { class: "rel", style: "margin:0" }, infos,
-      rel("Parents", p.parents), rel(p.spouses.length > 1 ? "Conjoints" : "Conjoint", p.spouses), rel("Frères et sœurs", p.siblings), rel("Enfants", p.children)),
-      !infos.length && !p.parents.length && !p.spouses.length && !p.siblings.length && !p.children.length ? h("p", { class: "muted", style: "margin:0" }, "Pas encore d'informations.") : null),
-    p.notes ? h("div", { class: "hint" }, p.notes) : null,
+    infos.length ? h("div", { class: "card" }, h("dl", { class: "rel", style: "margin:0" }, infos)) : null,
+    p.notes ? h("div", { class: "hint" }, p.notes, lock("notes")) : null,
+    !p.can_edit && p.hidden_count ? h("p", { class: "muted small" }, `🔒 ${p.first_name} garde ${p.hidden_count > 1 ? p.hidden_count + " infos" : "une info"} pour ${p.sex === "F" ? "elle" : "lui"}.`) : null,
     h("h2", {}, isMe ? "Mes documents" : `Documents de ${p.first_name}`),
     p.documents.length ? h("div", { class: "card" }, p.documents.map(docRow)) : h("div", { class: "hint" }, "Aucun document visible pour vous."),
+    h("h2", {}, "Sa famille"),
+    h("div", { class: "card" }, h("dl", { class: "rel", style: "margin:0" },
+      rel("Parents", p.parents), rel(p.spouses.length > 1 ? "Conjoints" : "Conjoint", p.spouses), rel("Frères et sœurs", p.siblings), rel("Enfants", p.children)),
+      !p.parents.length && !p.spouses.length && !p.siblings.length && !p.children.length ? h("p", { class: "muted", style: "margin:0" }, "Pas encore de liens dans l'arbre.") : null),
     ...actions,
   ];
+}
+
+const INFO_LABELS = [["birth_date", "Date de naissance"], ["birth_place", "Lieu de naissance"], ["city", "Ville"], ["job", "Métier"],
+  ["phone", "Téléphone"], ["email", "E-mail"], ["notes", "Notes, souvenirs"]];
+
+function memberBody(p, extra = {}) {
+  const k = ["first_name", "last_name", "birth_name", "sex", "birth_date", "birth_place", "death_date", "deceased", "notes",
+    "phone", "email", "city", "job", "father_id", "mother_id"];
+  return { ...Object.fromEntries(k.map((x) => [x, p[x] ?? ""])), father_id: p.father_id, mother_id: p.mother_id, deceased: !!p.deceased, ...extra };
+}
+
+function privacySheet(p, isMe) {
+  const priv = new Set(p.private_fields || []);
+  const boxes = INFO_LABELS.map(([k, label]) => {
+    const cb = h("input", { type: "checkbox", checked: !priv.has(k) });
+    cb.dataset.k = k;
+    return h("label", { class: "privrow" }, h("span", {}, h("b", {}, label), h("small", { class: "muted" }, p[k] ? (k === "birth_date" ? frDate(p[k]) : String(p[k]).slice(0, 40)) : "pas rempli")), cb);
+  });
+  const err = h("div");
+  const close = sheet(h("h2", {}, isMe ? "Ce que la famille voit" : `Infos de ${p.first_name} visibles par la famille`),
+    h("p", { class: "muted" }, "Coché : toute la famille le voit sur ta fiche. Décoché : seulement toi (et l'administrateur)."),
+    h("div", { class: "card" }, boxes),
+    err,
+    h("button", { class: "btn", onclick: async () => {
+      const private_fields = boxes.map((b) => b.querySelector("input")).filter((c) => !c.checked).map((c) => c.dataset.k);
+      try { await api.patch(`/api/members/${p.id}`, memberBody(p, { private_fields })); close(); toast("C'est enregistré"); window.dispatchEvent(new HashChangeEvent("hashchange")); }
+      catch (x) { err.replaceChildren(errBox(x)); }
+    } }, "Enregistrer"),
+    h("button", { class: "btn ghost", onclick: () => close() }, "Annuler"));
 }
 
 function childDefaults(p) {
@@ -217,7 +259,7 @@ function childDefaults(p) {
 
 function editPerson(p, preset = {}) {
   const isNew = !p;
-  p = p || { first_name: "", last_name: "", birth_name: "", sex: "", birth_date: "", birth_place: "", death_date: "", deceased: false, notes: "", father_id: null, mother_id: null, ...preset };
+  p = p || { first_name: "", last_name: "", birth_name: "", sex: "", birth_date: "", birth_place: "", death_date: "", deceased: false, notes: "", phone: "", email: "", city: "", job: "", father_id: null, mother_id: null, ...preset };
   const f = {};
   const field = (k, label, attrs = {}) => [h("label", { class: "lbl", for: "e-" + k }, label), (f[k] = h("input", { class: "field", id: "e-" + k, value: p[k] || "", ...attrs }))];
   const peopleSelect = (k, sex) => {
@@ -237,7 +279,7 @@ function editPerson(p, preset = {}) {
     const body = {
       first_name: f.first_name.value, last_name: f.last_name.value, birth_name: f.birth_name.value, sex: f.sex.value,
       birth_date: f.birth_date.value, birth_place: f.birth_place.value, death_date: f.death_date.value, deceased: f.deceased.checked,
-      notes: f.notes.value,
+      notes: f.notes.value, phone: f.phone.value, email: f.email.value, city: f.city.value, job: f.job.value,
       father_id: showParents ? (Number(f.father_id.value) || null) : p.father_id,
       mother_id: showParents ? (Number(f.mother_id.value) || null) : p.mother_id,
       parent_of: preset.parent_of, spouse_of: preset.spouse_of, sibling_of: preset.sibling_of,
@@ -253,6 +295,8 @@ function editPerson(p, preset = {}) {
     (f.sex = h("select", { class: "field", id: "e-sex" }, [["", "—"], ["M", "Homme"], ["F", "Femme"]].map(([v, l]) => h("option", { value: v, selected: p.sex === v }, l)))),
     field("birth_date", "Date de naissance", { type: "date" }), field("birth_place", "Lieu de naissance"),
     field("birth_name", "Nom de naissance (si différent)"),
+    field("city", "Ville où il ou elle habite"), field("job", "Métier"),
+    field("phone", "Téléphone", { type: "tel" }), field("email", "E-mail", { type: "email" }),
     showParents ? [h("label", { class: "lbl", for: "e-father_id" }, "Père"), peopleSelect("father_id", "M"), h("label", { class: "lbl", for: "e-mother_id" }, "Mère"), peopleSelect("mother_id", "F")] : null,
     h("label", { class: "lbl" }, (f.deceased = h("input", { type: "checkbox", checked: !!p.deceased })), "Décédé(e)"),
     field("death_date", "Date de décès", { type: "date" }),
