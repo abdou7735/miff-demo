@@ -1,7 +1,7 @@
 // Miff : démarrage et navigation.
-import { api, ApiError } from "./api.js";
-import { errBox, h, icon, initials } from "./ui.js";
-import * as V from "./views.js";
+import { api, ApiError } from "./api.js?v=1795724117";
+import { errBox, h, icon, initials } from "./ui.js?v=1795724117";
+import * as V from "./views.js?v=1795724117";
 
 const app = document.getElementById("app");
 
