@@ -119,7 +119,7 @@ export async function viewTree() {
     if (!st.scale) {
       // L'arbre tient dans la largeur de l'écran, sans devenir illisible.
       const W = Number(draw(1).getAttribute("width"));
-      st.scale = Math.max(0.5, Math.min(1, (Math.min(window.innerWidth, 560) - 8) / W));
+      st.scale = Math.max(0.62, Math.min(1, (Math.min(window.innerWidth, 560) - 8) / W));
     }
     const svg = draw(st.scale);
     box.replaceChildren(svg);
