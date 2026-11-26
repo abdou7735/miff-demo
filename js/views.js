@@ -109,59 +109,125 @@ export async function viewTree() {
   if (!state.tree) state.tree = { level: 1, center: meId, scale: null };
   const st = state.tree;
   if (!M(st.center)) st.center = meId;
-  const box = h("div", { class: "treebox" });
+  const world = h("div", { class: "treeworld" });
+  const box = h("div", { class: "treecanvas", "aria-label": "Arbre : glissez pour vous déplacer, pincez ou utilisez la molette pour zoomer" }, world);
   const pick = (id) => (location.hash = `#/personne/${id}`);
   const levels = h("div", { class: "sub", role: "tablist", "aria-label": "Jusqu'où voir" });
   const banner = h("div");
   const info = h("div", { class: "hint" });
-  const draw = (scale) => drawTree(state.members, meId, pick, { scale, centerId: st.center, level: st.level, onExpand: (id) => { st.center = id; st.scale = null; render(true); } });
+  // La vue : décalage (x, y) et zoom (k). L'arbre est dessiné une fois, on le déplace en entier.
+  const v = { x: 0, y: 0, k: 1 };
+  let svg = null, W = 0, H = 0;
+  const MIN = 0.25, MAX = 2.5;
+  const apply = () => {
+    const bw = box.clientWidth || 360, bh = box.clientHeight || 480, m = 80;
+    // On garde toujours un bout de l'arbre à l'écran.
+    v.x = Math.min(bw - m, Math.max(m - W * v.k, v.x));
+    v.y = Math.min(bh - m, Math.max(m - H * v.k, v.y));
+    world.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.k})`;
+  };
+  const zoomAt = (k, cx, cy) => {
+    k = Math.min(MAX, Math.max(MIN, k));
+    v.x = cx - (cx - v.x) * (k / v.k); v.y = cy - (cy - v.y) * (k / v.k); v.k = k; apply();
+  };
+  const centerOn = (id, fit) => {
+    const bw = box.clientWidth || Math.min(window.innerWidth, 560), bh = box.clientHeight || 480;
+    if (fit) v.k = Math.min(1, Math.max(0.5, (bw - 16) / W));
+    const p = svg._pos(id);
+    v.x = p ? bw / 2 - p.x * v.k : (bw - W * v.k) / 2;
+    v.y = p ? bh * 0.4 - p.y * v.k : 16;
+    apply();
+  };
   function render(recenter) {
-    if (!st.scale) {
-      // L'arbre tient dans la largeur de l'écran, sans devenir illisible.
-      const W = Number(draw(1).getAttribute("width"));
-      st.scale = Math.max(0.62, Math.min(1, (Math.min(window.innerWidth, 560) - 8) / W));
-    }
-    const svg = draw(st.scale);
-    box.replaceChildren(svg);
+    svg = drawTree(state.members, meId, pick, { scale: 1, centerId: st.center, level: st.level, onExpand: (id) => { st.center = id; render(true); } });
+    W = Number(svg.getAttribute("width")); H = Number(svg.getAttribute("height"));
+    world.replaceChildren(svg);
     levels.replaceChildren(...[[1, "Proche"], [2, "Famille"], [3, "Tout l'arbre"]].map(([l, txt]) =>
-      h("button", { class: st.level === l ? "on" : "", role: "tab", "aria-selected": st.level === l ? "true" : "false", onclick: () => { st.level = l; st.scale = null; render(true); } }, txt)));
+      h("button", { class: st.level === l ? "on" : "", role: "tab", "aria-selected": st.level === l ? "true" : "false", onclick: () => { st.level = l; render(true); } }, txt)));
     const c = M(st.center);
     banner.replaceChildren(...(st.center !== meId && c && st.level < 3 ? [h("div", { class: "centerbar" }, h("span", {}, "Vu depuis ", h("b", {}, c.first_name)),
-      h("button", { onclick: () => { st.center = meId; st.scale = null; render(true); } }, "Revenir à moi"))] : []));
+      h("button", { onclick: () => { st.center = meId; render(true); } }, "Revenir à moi"))] : []));
     const shown = svg.querySelectorAll(".node").length;
-    info.textContent = st.level < 3
-      ? `${shown} personne${shown > 1 ? "s" : ""} sur ${state.members.length}. Touchez une bulle « +2 » pour voir la famille de quelqu'un, ou « Famille » pour voir plus loin.`
-      : `Les ${state.members.length} personnes de l'arbre. Faites glisser pour tout voir. Touchez une personne pour ouvrir sa fiche.`;
-    if (recenter) requestAnimationFrame(() => {
-      const p = svg._pos(st.center);
-      box.scrollLeft = p ? p.x - box.clientWidth / 2 : (box.scrollWidth - box.clientWidth) / 2;
-    });
+    info.textContent = `${shown} personne${shown > 1 ? "s" : ""} sur ${state.members.length}. Glissez pour vous déplacer, pincez (ou molette) pour zoomer. Touchez une personne pour ouvrir sa fiche.`;
+    if (recenter) requestAnimationFrame(() => centerOn(st.center, true));
+    else apply();
   }
-  const zoom = (d) => { st.scale = Math.min(1.6, Math.max(0.35, st.scale + d)); const cx = box.scrollLeft + box.clientWidth / 2, k = (st.scale) / (st.scale - d); render(false); box.scrollLeft = cx * k - box.clientWidth / 2; };
-  // Pincer avec deux doigts pour zoomer.
-  let pinch = null;
-  box.addEventListener("touchstart", (e) => { if (e.touches.length === 2) pinch = { d: dist(e), s: st.scale }; }, { passive: true });
-  box.addEventListener("touchmove", (e) => {
-    if (!pinch || e.touches.length !== 2) return;
-    const ns = Math.min(1.6, Math.max(0.35, pinch.s * dist(e) / pinch.d));
-    if (Math.abs(ns - st.scale) > 0.04) { st.scale = ns; render(false); }
-  }, { passive: true });
-  box.addEventListener("touchend", () => { pinch = null; });
-  const dist = (e) => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+
+  // Glisser avec un doigt ou la souris, pincer avec deux doigts.
+  const pts = new Map();
+  let drag = null, moved = false;
+  const local = (e) => { const r = box.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  const startGesture = () => {
+    const ps = [...pts.values()];
+    if (ps.length === 1) drag = { mode: "pan", x: ps[0][0], y: ps[0][1], vx: v.x, vy: v.y };
+    else if (ps.length === 2) drag = { mode: "pinch", d: Math.hypot(ps[0][0] - ps[1][0], ps[0][1] - ps[1][1]), k: v.k,
+      cx: (ps[0][0] + ps[1][0]) / 2, cy: (ps[0][1] + ps[1][1]) / 2, vx: v.x, vy: v.y };
+  };
+  box.addEventListener("pointerdown", (e) => {
+    if (e.button && e.button !== 0) return;
+    pts.set(e.pointerId, local(e)); moved = false; startGesture();
+    box.classList.add("grabbing");
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!pts.has(e.pointerId) || !drag) return;
+    pts.set(e.pointerId, local(e));
+    const ps = [...pts.values()];
+    if (drag.mode === "pan" && ps.length === 1) {
+      const dx = ps[0][0] - drag.x, dy = ps[0][1] - drag.y;
+      if (Math.abs(dx) + Math.abs(dy) > 6) moved = true;
+      if (moved) { v.x = drag.vx + dx; v.y = drag.vy + dy; apply(); }
+    } else if (drag.mode === "pinch" && ps.length === 2) {
+      moved = true;
+      const d = Math.hypot(ps[0][0] - ps[1][0], ps[0][1] - ps[1][1]);
+      const cx = (ps[0][0] + ps[1][0]) / 2, cy = (ps[0][1] + ps[1][1]) / 2;
+      const k = Math.min(MAX, Math.max(MIN, drag.k * d / drag.d));
+      // Le point entre les deux doigts reste sous les doigts.
+      v.x = cx - (drag.cx - drag.vx) * (k / drag.k); v.y = cy - (drag.cy - drag.vy) * (k / drag.k); v.k = k; apply();
+    }
+  });
+  const end = (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.delete(e.pointerId);
+    if (pts.size) startGesture(); else { drag = null; box.classList.remove("grabbing"); }
+  };
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+  // Après un glissement, on n'ouvre pas la fiche par erreur.
+  box.addEventListener("click", (e) => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
+  box.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const [cx, cy] = local(e);
+    if (e.ctrlKey || e.metaKey || Math.abs(e.deltaY) >= 40 && !e.deltaX) zoomAt(v.k * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), cx, cy);
+    else { v.x -= e.deltaX; v.y -= e.deltaY; apply(); }
+  }, { passive: false });
+  box.addEventListener("dblclick", (e) => { const [cx, cy] = local(e); zoomAt(v.k * 1.6, cx, cy); });
+  const zoomBtn = (f) => zoomAt(v.k * f, box.clientWidth / 2, box.clientHeight / 2);
+  const full = () => {
+    const on = !box.classList.contains("full");
+    box.classList.toggle("full", on); document.body.classList.toggle("treefull", on);
+    requestAnimationFrame(() => centerOn(st.center, false));
+  };
+  const tools = h("div", { class: "treetools" },
+    h("button", { "aria-label": "Dézoomer", onclick: () => zoomBtn(1 / 1.3) }, "−"),
+    h("button", { "aria-label": "Zoomer", onclick: () => zoomBtn(1.3) }, "+"),
+    h("button", { "aria-label": "Recentrer sur la personne", onclick: () => centerOn(st.center, true) }, "◎"),
+    h("button", { "aria-label": "Plein écran", onclick: full }, "⛶"));
+  box.append(tools);
+  window.addEventListener("keydown", (e) => { if (e.key === "Escape" && box.classList.contains("full")) full(); });
+  window.addEventListener("hashchange", () => document.body.classList.remove("treefull"), { once: true });
 
   const results = h("div", { class: "wrapchips", style: "margin-top:8px" });
   const search = h("input", { class: "field", type: "search", placeholder: "Chercher quelqu'un (prénom)", "aria-label": "Chercher quelqu'un dans l'arbre", oninput: () => {
     const q = norm(search.value.trim());
     results.replaceChildren(...(q ? state.members.filter((m) => norm(fullName(m)).includes(q)).slice(0, 6).map((m) =>
-      h("button", { class: "chip", onclick: () => { st.center = m.id; st.level = Math.max(st.level, 1) === 3 ? 3 : 2; st.scale = null; search.value = ""; results.replaceChildren(); render(true); } }, m.first_name, m.relation && m.relation !== "Moi" ? ` · ${m.relation.toLowerCase()}` : "")) : []));
+      h("button", { class: "chip", onclick: () => { st.center = m.id; st.level = Math.max(st.level, 1) === 3 ? 3 : 2; search.value = ""; results.replaceChildren(); render(true); } }, m.first_name, m.relation && m.relation !== "Moi" ? ` · ${m.relation.toLowerCase()}` : "")) : []));
   } });
   render(true);
   const me = M(meId);
   return [
     levels, banner,
-    h("div", { class: "zoom" }, h("button", { "aria-label": "Dézoomer", onclick: () => zoom(-0.15) }, "−"), h("button", { "aria-label": "Zoomer", onclick: () => zoom(0.15) }, "+")),
     box,
-    h("div", { class: "legend" }, h("span", {}, h("i", { style: "background:#1f6a4b" }), "Moi"), h("span", {}, h("i", { style: "background:#c4e5d3" }), "Frères et sœurs"), h("span", {}, h("i", { style: "background:#9097a1" }), "Décédé")),
+    h("div", { class: "legend" }, h("span", {}, h("i", { class: "me" }), "Moi"), h("span", {}, h("i", { style: "background:#d6f0e0" }), h("i", { style: "background:#d6e7fa;margin-left:-4px" }), h("i", { style: "background:#fadbe5;margin-left:-4px" }), "Une couleur par famille"), h("span", {}, h("i", { class: "dead" }), "Décédé")),
     info, search, results,
     h("button", { class: "btn", onclick: () => birthSheet() }, "👶 Annoncer une naissance"),
     h("button", { class: "btn sec", style: "margin-top:10px", onclick: () => editPerson(null, { sibling_of: me?.id }) }, "+ Ajouter un frère ou une sœur"),
