@@ -281,3 +281,33 @@ body.treefull{overflow:hidden}
 .legend i.dead{background:#fff;border:1.5px dashed #9aa5ae;width:9px;height:9px}
 @media(min-width:700px){.treecanvas{height:min(70vh,760px)}}
 body{overflow-x:hidden}
+
+/* ============ Ordinateur : toute la largeur, menu à gauche ============ */
+@media (min-width: 960px) {
+  body { background: var(--bg); }
+  .app { max-width: none; margin: 0; padding-left: 232px; box-shadow: none; }
+  .top { padding: 14px 32px; }
+  .top h1 { font-size: 24px; }
+  main { padding: 24px 32px 48px; }
+  .tabs { top: 0; bottom: 0; left: 0; right: auto; transform: none; width: 232px; max-width: none; display: flex; flex-direction: column; gap: 4px;
+    padding: 18px 14px; border-top: 0; border-right: 1px solid var(--line); background: var(--surf); backdrop-filter: none; }
+  .tabs::before { content: "Miff"; font-size: 26px; font-weight: 800; letter-spacing: -.02em; color: var(--green); padding: 4px 14px 18px; }
+  .tabs a { display: flex; align-items: center; gap: 12px; justify-items: start; font-size: 15px; font-weight: 600; padding: 10px 14px; min-height: 46px; border-radius: 12px; }
+  .tabs a:hover { background: var(--greenT); }
+  .tabs a.on { background: var(--bg); box-shadow: 0 0 0 1px var(--line); }
+  .tabs .plus { width: 30px; height: 30px; margin: 0 -3px; }
+  .tabs .plus svg { width: 18px; height: 18px; }
+  .tabic .dot { top: -6px; right: -8px; }
+  .toast { bottom: 32px; margin-left: 116px; }
+  .sheet { align-items: center; padding-left: 232px; }
+  .sheet > div { border-radius: 22px; max-width: 620px; }
+  .fab { right: 32px; bottom: 32px; }
+  .chathead { margin: -24px -32px 0; padding: 12px 32px; top: 69px; }
+  .composer { left: 232px; right: 0; transform: none; width: auto; max-width: none; bottom: 0; padding: 10px 32px; }
+  body.inchat main { padding-bottom: 110px; }
+  .treecanvas { height: calc(100vh - 250px) !important; min-height: 460px; }
+  /* Listes en plusieurs colonnes quand il y a la place. */
+  .desk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 0 24px; align-items: start; }
+  .btn { max-width: 420px; }
+  .row > .btn, .sheet .btn { max-width: none; }
+}

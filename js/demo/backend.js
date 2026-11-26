@@ -1,8 +1,8 @@
 // Version de démonstration : le « serveur » Miff tourne dans le navigateur.
 // Les données restent dans ce navigateur (localStorage + IndexedDB). Aucun envoi sur Internet.
-import { analyze, norm, TYPE_LABELS } from "./recognize.js?v=1795724117";
-import { detectQuad, loadBitmap, processImage } from "./image.js?v=1795724117";
-import { makeSeedPages, SEED } from "./seed.js?v=1795724117";
+import { analyze, norm, TYPE_LABELS } from "./recognize.js?v=1795724226";
+import { detectQuad, loadBitmap, processImage } from "./image.js?v=1795724226";
+import { makeSeedPages, SEED } from "./seed.js?v=1795724226";
 
 const KEY = "miff-demo-db-v6", SESSION = "miff-demo-user";
 

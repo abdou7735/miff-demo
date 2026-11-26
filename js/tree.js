@@ -1,7 +1,7 @@
 // Dessin de l'arbre familial en SVG.
 // Deux vues : « toute la famille » (centrée sur moi, les foyers de ma génération repliés)
 // et « le foyer d'une personne » (elle, son conjoint et leurs descendants).
-import { s, initials, years } from "./ui.js?v=1795724117";
+import { s, initials, years } from "./ui.js?v=1795724226";
 
 const NODE_W = 104, ROW_H = 140, R = 30, TOP = 64, GAP = 24, GRID_ROW = 132, PAD = 10;
 

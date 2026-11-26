@@ -1,6 +1,6 @@
 // Scanner intégré : caméra, cadre vert qui suit la feuille, redressement, plusieurs pages.
-import { api } from "./api.js?v=1795724117";
-import { h, s, toast } from "./ui.js?v=1795724117";
+import { api } from "./api.js?v=1795724226";
+import { h, s, toast } from "./ui.js?v=1795724226";
 
 const canLive = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext);
 

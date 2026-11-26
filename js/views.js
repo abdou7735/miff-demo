@@ -1,9 +1,9 @@
 // Les écrans de l'appli.
-import { api } from "./api.js?v=1795724117";
-import { openScanner } from "./scanner.js?v=1795724117";
-import { drawTree, familyView } from "./tree.js?v=1795724117";
-import { api as _a, DEMO } from "./api.js?v=1795724117";
-import { apiImg, apiLink, ask, errBox, folderIcon, frDate, fullName, h, icon, initials, sheet, toast, VIS_LABEL, years } from "./ui.js?v=1795724117";
+import { api } from "./api.js?v=1795724226";
+import { openScanner } from "./scanner.js?v=1795724226";
+import { drawTree, familyView } from "./tree.js?v=1795724226";
+import { api as _a, DEMO } from "./api.js?v=1795724226";
+import { apiImg, apiLink, ask, errBox, folderIcon, frDate, fullName, h, icon, initials, sheet, toast, VIS_LABEL, years } from "./ui.js?v=1795724226";
 
 export const state = { me: null, members: [], groups: null, treeScale: null, docTab: "dossiers", generation: null, pending: null };
 
